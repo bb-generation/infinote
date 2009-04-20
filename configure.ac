@@ -1,4 +1,4 @@
-m4_define([libinfinity_version], [0.2.1])
+m4_define([libinfinity_version], [0.2.2])
 
 AC_PREREQ(2.59)
 AC_INIT([libinfinity], [libinfinity_version], [armin@arbur.net])
