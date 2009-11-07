@@ -1,3 +1,9 @@
+2009-11-07  Armin Burgmeier  <armin@arbur.net>
+
+	* libinfinity/common/inf-tcp-connection.c (inf_tcp_connection_open):
+	Fix the condition for closing an existing socket. Spotted by Gabríel
+	A. Pétursson.
+
 2009-10-26  Armin Burgmeier  <armin@arbur.net>
 
 	* libinfgtk/inf-gtk-certificate-manager.c
