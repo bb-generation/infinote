@@ -1,3 +1,8 @@
+2011-01-14  Philipp Kern  <phil@0x539.de>
+
+	* infinoted/Makefile.am:
+	* infinoted/infinoted-0.4.man: add a manpage for infinoted
+
 2010-01-31  Benjamin Herr  <ben@0x539.de>, Armin Burgmeier  <armin@arbur.net>
 
 	* configure.ac: Check for SO_REUSEADDR.
