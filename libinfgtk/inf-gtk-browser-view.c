@@ -2640,4 +2640,84 @@ inf_gtk_browser_view_set_selected(InfGtkBrowserView* view,
   gtk_tree_selection_select_iter(selection, iter);
 }
 
+
+/**
+ * inf_gtk_browser_view_status_cell_renderer:
+ * @view: A #InfGtkBrowserView.
+ * @renderer: A #GtkCellRenderer Rendering the Status Icon.
+ *
+ * Sets @renderer to render Status Icon in @view
+ */
+static guint
+inf_gtk_browser_view_set_status_cell_renderer(InfGtkBrowserView* view,
+					      GtkCellRenderer* renderer)
+{
+  InfGtkBrowserViewPrivate* priv;
+
+  priv = INF_GTK_BROWSER_VIEW_PRIVATE(view);
+	
+  gtk_cell_layout_clear(GTK_CELL_LAYOUT(priv->column));
+	
+  priv->renderer_icon = renderer;
+  priv->renderer_status_icon = gtk_cell_renderer_pixbuf_new();
+  priv->renderer_name = gtk_cell_renderer_text_new();
+  priv->renderer_progress = gtk_cell_renderer_progress_new();
+  priv->renderer_status = gtk_cell_renderer_text_new();
+  
+  g_object_set(G_OBJECT(priv->renderer_status), "xpad", 10, NULL);
+  g_object_set(G_OBJECT(priv->renderer_status_icon), "xpad", 5, NULL);
+
+  gtk_tree_view_column_pack_start(priv->column, priv->renderer_icon, FALSE);
+
+  gtk_tree_view_column_pack_start(
+    priv->column,
+    priv->renderer_status_icon,
+    FALSE
+  );
+
+  gtk_tree_view_column_pack_start(priv->column, priv->renderer_name, FALSE);
+  gtk_tree_view_column_pack_start(
+    priv->column,
+    priv->renderer_progress,
+    FALSE
+  );
+
+  gtk_tree_view_column_pack_start(priv->column, priv->renderer_status, TRUE);
+
+  gtk_tree_view_column_set_cell_data_func(
+    priv->column,
+    priv->renderer_status_icon,
+    inf_gtk_browser_view_status_icon_data_func,
+    NULL,
+    NULL
+  );
+
+  gtk_tree_view_column_set_cell_data_func(
+    priv->column,
+    priv->renderer_name,
+    inf_gtk_browser_view_name_data_func,
+    NULL,
+    NULL
+  );
+
+  gtk_tree_view_column_set_cell_data_func(
+    priv->column,
+    priv->renderer_progress,
+    inf_gtk_browser_view_progress_data_func,
+    NULL,
+    NULL
+  );
+
+  gtk_tree_view_column_set_cell_data_func(
+    priv->column,
+    priv->renderer_status,
+    inf_gtk_browser_view_status_data_func,
+    NULL,
+    NULL
+  );
+
+}
+
+
+
 /* vim:set et sw=2 ts=2: */
