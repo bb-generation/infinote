@@ -2648,7 +2648,7 @@ inf_gtk_browser_view_set_selected(InfGtkBrowserView* view,
  *
  * Sets @renderer to render Status Icon in @view
  */
-static guint
+void
 inf_gtk_browser_view_set_status_cell_renderer(InfGtkBrowserView* view,
 					      GtkCellRenderer* renderer)
 {
@@ -2717,6 +2717,13 @@ inf_gtk_browser_view_set_status_cell_renderer(InfGtkBrowserView* view,
   );
 
 }
+
+GtkTreeViewColumn*
+inf_gtk_browser_view_get_column(InfGtkBrowserView* view)
+{
+	return INF_GTK_BROWSER_VIEW_PRIVATE(view)->column;
+}
+
 
 
 
