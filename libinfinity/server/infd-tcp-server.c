@@ -239,6 +239,12 @@ infd_tcp_server_io(InfNativeSocket* socket,
           &error
         );
 
+        // TODO: use properties
+        g_object_set(G_OBJECT(connection), "keepalive", TRUE, NULL);
+        g_object_set(G_OBJECT(connection), "keepalive-time", 15, NULL);
+        g_object_set(G_OBJECT(connection), "keepalive-interval", 15, NULL);
+        g_object_set(G_OBJECT(connection), "keepalive-probes", 2, NULL);
+
         if(connection != NULL)
         {
           g_signal_emit(

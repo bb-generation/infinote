@@ -330,6 +330,12 @@ inf_xmpp_manager_add_connection_handler(InfXmppManager* xmpp_manager,
     xmpp_manager
   );
 
+  // TODO: use properties
+  g_object_set(G_OBJECT(tcp), "keepalive", TRUE, NULL);
+  g_object_set(G_OBJECT(tcp), "keepalive-time", 15, NULL);
+  g_object_set(G_OBJECT(tcp), "keepalive-interval", 15, NULL);
+  g_object_set(G_OBJECT(tcp), "keepalive-probes", 2, NULL);
+
   key = inf_xmpp_manager_key_new(connection);
   g_tree_insert(priv->connections, key, connection);
   g_object_ref(connection);

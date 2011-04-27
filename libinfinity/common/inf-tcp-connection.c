@@ -32,6 +32,7 @@
 # include <sys/types.h>
 # include <sys/socket.h>
 # include <netinet/in.h>
+# include <netinet/tcp.h>
 # include <net/if.h>
 # include <arpa/inet.h>
 # include <unistd.h>
@@ -78,6 +79,19 @@ struct _InfTcpConnectionPrivate {
   guint remote_port;
   unsigned int device_index;
 
+  /* keepalive state */
+  guint keepalive;
+  /* the interval between the last data packet sent and the first keepalive
+   * probe
+   */
+  guint keepalive_time;
+  /* the interval between subsequential keepalive probes */
+  guint keepalive_interval;
+  /* the number of unacknowledged probes to send before considering the
+   * connection dead and notifying the application layer
+   */
+  guint keepalive_probes;
+
   guint8* queue;
   gsize front_pos;
   gsize back_pos;
@@ -97,7 +111,12 @@ enum {
   PROP_LOCAL_PORT,
 
   PROP_DEVICE_INDEX,
-  PROP_DEVICE_NAME
+  PROP_DEVICE_NAME,
+
+  PROP_KEEPALIVE,
+  PROP_KEEPALIVE_TIME,
+  PROP_KEEPALIVE_INTERVAL,
+  PROP_KEEPALIVE_PROBES
 };
 
 enum {
@@ -478,6 +497,10 @@ inf_tcp_connection_init(GTypeInstance* instance,
   priv->watch = NULL;
   priv->status = INF_TCP_CONNECTION_CLOSED;
   priv->socket = INVALID_SOCKET;
+  priv->keepalive = -1;
+  priv->keepalive_time = -1;
+  priv->keepalive_interval = -1;
+  priv->keepalive_probes = -1;
 
   priv->remote_address = NULL;
   priv->remote_port = 0;
@@ -528,6 +551,129 @@ inf_tcp_connection_finalize(GObject* object)
   g_free(priv->queue);
 
   G_OBJECT_CLASS(parent_class)->finalize(object);
+}
+
+static gboolean
+inf_tcp_connection_set_keepalive(InfTcpConnection* connection,
+                                 gboolean activate)
+{
+  InfTcpConnectionPrivate* priv;
+  int on;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  if(priv->socket == INVALID_SOCKET)
+    return FALSE;
+
+  if (activate == TRUE)
+    on = 1;
+  else
+    on = 0;
+
+  if (on == priv->keepalive)
+    return TRUE;
+
+  if (setsockopt(priv->socket, SOL_SOCKET, SO_KEEPALIVE, (char*) &on, sizeof(on)) < 0)
+  {
+    return FALSE;
+  }
+
+  priv->keepalive = on;
+
+  return TRUE;
+}
+
+static gboolean
+inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
+                                      gint time)
+{
+  InfTcpConnectionPrivate* priv;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  if(priv->socket == INVALID_SOCKET)
+    return FALSE;
+
+#if defined(TCP_KEEPIDLE)
+  if (time == priv->keepalive_time)
+    return TRUE;
+
+  if (setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, (char*) &time, sizeof(time)) < 0)
+  {
+    return FALSE;
+  }
+
+  priv->keepalive_time = time;
+
+#else
+  /* not supported */
+  if (time != 0)
+    return FALSE;
+#endif /* TCP_KEEPIDLE */
+
+  return TRUE;
+}
+
+static gboolean
+inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
+                                          gint interval)
+{
+  InfTcpConnectionPrivate* priv;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  if(priv->socket == INVALID_SOCKET)
+    return FALSE;
+
+#if defined(TCP_KEEPINTVL)
+  if (interval == priv->keepalive_interval)
+    return TRUE;
+
+  if (setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, (char*) &interval, sizeof(interval)) < 0)
+  {
+    return FALSE;
+  }
+
+  priv->keepalive_interval = interval;
+
+#else
+  /* not supported */
+  if (interval != 0)
+    return FALSE;
+#endif /* TCP_KEEPINTVL */
+
+  return TRUE;
+}
+
+static gboolean
+inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
+                                        gint probes)
+{
+  InfTcpConnectionPrivate* priv;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  if(priv->socket == INVALID_SOCKET)
+    return FALSE;
+
+#if defined(TCP_KEEPCNT)
+  if (probes == priv->keepalive_probes)
+    return TRUE;
+
+  if (setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPCNT, (char*) &probes, sizeof(probes)) < 0)
+  {
+    return FALSE;
+  }
+
+  priv->keepalive_probes = probes;
+
+#else
+  /* not supported */
+  if (probes != 0)
+    return FALSE;
+#endif /* TCP_KEEPCNT */
+
+  return TRUE;
 }
 
 static void
@@ -589,6 +735,18 @@ inf_tcp_connection_set_property(GObject* object,
       g_object_notify(G_OBJECT(object), "device-index");
     }
 #endif
+    break;
+  case PROP_KEEPALIVE:
+    inf_tcp_connection_set_keepalive(connection, g_value_get_boolean(value));
+    break;
+  case PROP_KEEPALIVE_TIME:
+    inf_tcp_connection_set_keepalive_time(connection, g_value_get_int(value));
+    break;
+  case PROP_KEEPALIVE_INTERVAL:
+    inf_tcp_connection_set_keepalive_interval(connection, g_value_get_int(value));
+    break;
+  case PROP_KEEPALIVE_PROBES:
+    inf_tcp_connection_set_keepalive_probes(connection, g_value_get_int(value));
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -827,6 +985,60 @@ inf_tcp_connection_class_init(gpointer g_class,
       "The name of the device to use for the connection, such as `eth0'",
       NULL,
       G_PARAM_READWRITE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_KEEPALIVE,
+    g_param_spec_boolean(
+      "keepalive",
+      "Keepalive",
+      "Keepalive on/off",
+      TRUE,
+      G_PARAM_CONSTRUCT | G_PARAM_WRITABLE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_KEEPALIVE_TIME,
+    g_param_spec_int(
+      "keepalive-time",
+      "Keepalive time",
+      "Keepalive time in seconds.",
+      0,
+      G_MAXINT,
+      15,
+      G_PARAM_CONSTRUCT | G_PARAM_WRITABLE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_KEEPALIVE_INTERVAL,
+    g_param_spec_int(
+      "keepalive-interval",
+      "Keepalive interval",
+      "Keepalive interval in seconds.",
+      0,
+      G_MAXINT,
+      15,
+      G_PARAM_CONSTRUCT | G_PARAM_WRITABLE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_KEEPALIVE_PROBES,
+    g_param_spec_int(
+      "keepalive-probes",
+      "Keepalive probes",
+      "Keepalive probes.",
+      0,
+      G_MAXINT,
+      2,
+      G_PARAM_CONSTRUCT | G_PARAM_WRITABLE
     )
   );
 
