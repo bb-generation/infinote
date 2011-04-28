@@ -80,17 +80,17 @@ struct _InfTcpConnectionPrivate {
   unsigned int device_index;
 
   /* keepalive state */
-  guint keepalive;
+  gint keepalive;
   /* the interval between the last data packet sent and the first keepalive
    * probe
    */
-  guint keepalive_time;
+  gint keepalive_time;
   /* the interval between subsequential keepalive probes */
-  guint keepalive_interval;
+  gint keepalive_interval;
   /* the number of unacknowledged probes to send before considering the
    * connection dead and notifying the application layer
    */
-  guint keepalive_probes;
+  gint keepalive_probes;
 
   guint8* queue;
   gsize front_pos;
@@ -594,7 +594,7 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-#if defined(TCP_KEEPIDLE)
+#ifdef TCP_KEEPIDLE
   if (time == priv->keepalive_time)
     return TRUE;
 
@@ -625,7 +625,7 @@ inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-#if defined(TCP_KEEPINTVL)
+#ifdef TCP_KEEPINTVL
   if (interval == priv->keepalive_interval)
     return TRUE;
 
@@ -656,7 +656,7 @@ inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-#if defined(TCP_KEEPCNT)
+#ifdef TCP_KEEPCNT
   if (probes == priv->keepalive_probes)
     return TRUE;
 
@@ -994,7 +994,7 @@ inf_tcp_connection_class_init(gpointer g_class,
     g_param_spec_boolean(
       "keepalive",
       "Keepalive",
-      "Keepalive on/off",
+      "When turned on the connection will be checked periodically if it is still operating.",
       TRUE,
       G_PARAM_CONSTRUCT | G_PARAM_WRITABLE
     )
@@ -1006,7 +1006,7 @@ inf_tcp_connection_class_init(gpointer g_class,
     g_param_spec_int(
       "keepalive-time",
       "Keepalive time",
-      "Keepalive time in seconds.",
+      "The time in seconds between the last data packet sent and the first keepalive probe.",
       0,
       G_MAXINT,
       15,
@@ -1020,7 +1020,7 @@ inf_tcp_connection_class_init(gpointer g_class,
     g_param_spec_int(
       "keepalive-interval",
       "Keepalive interval",
-      "Keepalive interval in seconds.",
+      "The time in seconds after a new keepalive probe will be sent if the previous one was successfully retrieved.",
       0,
       G_MAXINT,
       15,
@@ -1034,7 +1034,7 @@ inf_tcp_connection_class_init(gpointer g_class,
     g_param_spec_int(
       "keepalive-probes",
       "Keepalive probes",
-      "Keepalive probes.",
+      "The number of retries before the connection is declared as closed.",
       0,
       G_MAXINT,
       2,
