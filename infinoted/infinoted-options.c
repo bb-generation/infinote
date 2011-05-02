@@ -669,6 +669,18 @@ infinoted_options_load(InfinotedOptions* options,
       G_OPTION_ARG_NONE, NULL,
       N_("Kill a running daemon"), NULL },
 #endif
+    { "keepalive", 'K', 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Enable or disable keepalive polling"), NULL },
+    { "keepalive-time", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Interval between last package and first probe (in seconds)"), NULL },
+    { "keepalive-interval", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Interval between subsequent probes (in seconds)"), NULL },
+    { "keepalive-probes", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Number of unacknowledged probes to consider connection down"), NULL },
     { "version", 'v', G_OPTION_FLAG_NO_CONFIG_FILE,
       G_OPTION_ARG_NONE, NULL,
       N_("Display version information and exit"), NULL },
@@ -700,6 +712,10 @@ infinoted_options_load(InfinotedOptions* options,
   entries[i++].arg_data = &options->daemonize;
   entries[i++].arg_data = &kill_daemon;
 #endif
+  entries[i++].arg_data = &options->use_keepalive;
+  entries[i++].arg_data = &options->keepalive_time;
+  entries[i++].arg_data = &options->keepalive_interval;
+  entries[i++].arg_data = &options->keepalive_probes;
   entries[i++].arg_data = &display_version;
 
   display_version = FALSE;
@@ -891,6 +907,10 @@ infinoted_options_new(const gchar* const* config_files,
 #endif /* LIBINFINITY_HAVE_PAM */
   options->sync_directory = NULL;
   options->sync_interval = 0;
+  options->use_keepalive = 1;
+  options->keepalive_time = 15;
+  options->keepalive_interval = 15;
+  options->keepalive_probes = 2;
 
 #ifdef LIBINFINITY_HAVE_LIBDAEMON
   options->daemonize = FALSE;

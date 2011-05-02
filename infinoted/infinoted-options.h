@@ -51,6 +51,11 @@ struct _InfinotedOptions {
 #ifdef LIBINFINITY_HAVE_LIBDAEMON
   gboolean daemonize;
 #endif
+
+  gint use_keepalive;
+  gint keepalive_time;
+  gint keepalive_interval;
+  gint keepalive_probes;
 };
 
 typedef enum _InfinotedOptionsError {
