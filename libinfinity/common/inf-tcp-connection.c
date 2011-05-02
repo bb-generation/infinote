@@ -566,6 +566,7 @@ inf_tcp_connection_get_keepalive(InfTcpConnection* connection)
 {
   InfTcpConnectionPrivate* priv;
   gint on;
+  socklen_t len;
 
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
@@ -577,7 +578,8 @@ inf_tcp_connection_get_keepalive(InfTcpConnection* connection)
   if(priv->socket == INVALID_SOCKET)
     return -1;
 
-  if(getsockopt(priv->socket, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof(on)) < 0)
+  len = sizeof(on);
+  if(getsockopt(priv->socket, SOL_SOCKET, SO_KEEPALIVE, &on, &len) < 0)
   {
     return -1;
   }
@@ -613,7 +615,7 @@ inf_tcp_connection_set_keepalive(InfTcpConnection* connection,
     }
   }
 
-  if(setsockopt(priv->socket, SOL_SOCKET, SO_KEEPALIVE, (char*) &activate, sizeof(activate)) < 0)
+  if(setsockopt(priv->socket, SOL_SOCKET, SO_KEEPALIVE, (char*) &activate, (socklen_t) sizeof(activate)) < 0)
   {
     return FALSE;
   }
@@ -626,6 +628,7 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
 {
   InfTcpConnectionPrivate* priv;
   gint time;
+  socklen_t len;
 
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
@@ -638,7 +641,8 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
     return -1;
 
 #ifdef TCP_KEEPIDLE
-  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, sizeof(time)) < 0)
+  len = sizeof(time);
+  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, &len) < 0)
   {
     return -1;
   }
@@ -679,7 +683,7 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
   }
 
 #ifdef TCP_KEEPIDLE
-  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, sizeof(time)) < 0)
+  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, (socklen_t) sizeof(time)) < 0)
   {
     return FALSE;
   }
@@ -698,6 +702,7 @@ inf_tcp_connection_get_keepalive_interval(InfTcpConnection* connection)
 {
   InfTcpConnectionPrivate* priv;
   gint interval;
+  socklen_t len;
 
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
@@ -710,7 +715,8 @@ inf_tcp_connection_get_keepalive_interval(InfTcpConnection* connection)
     return -1;
 
 #ifdef TCP_KEEPINTVL
-  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval)) < 0)
+  len = sizeof(interval);
+  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, &len) < 0)
   {
     return -1;
   }
@@ -751,7 +757,7 @@ inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
   }
 
 #ifdef TCP_KEEPINTVL
-  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval)) < 0)
+  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, (socklen_t) sizeof(interval)) < 0)
   {
     return FALSE;
   }
@@ -770,6 +776,7 @@ inf_tcp_connection_get_keepalive_probes(InfTcpConnection* connection)
 {
   InfTcpConnectionPrivate* priv;
   gint probes;
+  socklen_t len;
 
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
@@ -782,7 +789,8 @@ inf_tcp_connection_get_keepalive_probes(InfTcpConnection* connection)
     return -1;
 
 #ifdef TCP_KEEPCNT
-  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes)) < 0)
+  len = sizeof(probes);
+  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPCNT, &probes, &len) < 0)
   {
     return -1;
   }
@@ -823,7 +831,7 @@ inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
   }
 
 #ifdef TCP_KEEPCNT
-  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes)) < 0)
+  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPCNT, &probes, (socklen_t) sizeof(probes)) < 0)
   {
     return FALSE;
   }
