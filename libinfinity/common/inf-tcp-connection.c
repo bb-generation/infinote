@@ -759,11 +759,25 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
 
 #ifndef G_OS_WIN32
 
+  /* Mac OS X uses the value of TCP_KEEPALIVE for the time/interval property.
+   * http://developer.apple.com/library/mac/#documentation/Darwin/Reference/ManPages/man4/tcp.4.html */
+#ifdef TCP_KEEPIDLE
+
   len = sizeof(time);
   if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, &len) < 0)
   {
     return -1;
   }
+
+#else /* else: TCP_KEEPALIVE */
+
+  len = sizeof(time);
+  if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPALIVE, &time, &len) < 0)
+  {
+    return -1;
+  }
+
+#endif /* TCP_KEEPIDLE */
 
 #else /* G_OS_WIN32 */
 
@@ -813,10 +827,23 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
 
 #ifndef G_OS_WIN32
 
+  /* Mac OS X uses the value of TCP_KEEPALIVE for the time/interval property.
+   * http://developer.apple.com/library/mac/#documentation/Darwin/Reference/ManPages/man4/tcp.4.html */
+#ifdef TCP_KEEPIDLE
+
   if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, (socklen_t) sizeof(time)) < 0)
   {
     return FALSE;
   }
+
+#else /* else: TCP_KEEPALIVE */
+
+  if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPALIVE, &time, (socklen_t) sizeof(time)) < 0)
+  {
+    return FALSE;
+  }
+
+#endif /* TCP_KEEPIDLE */
 
 #else /* G_OS_WIN32 */
 
