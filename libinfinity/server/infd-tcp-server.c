@@ -239,6 +239,11 @@ infd_tcp_server_io(InfNativeSocket* socket,
           &error
         );
 
+        /* XXX: deactivated keepalive because of an assertion error in
+         * inf_xmpp_connection_xml_connection_send. The status was
+         * INF_XMPP_CONNECTION_CLOSED. Maybe an sync problem?  */
+        g_object_set(G_OBJECT(connection), "keepalive", 0, NULL);
+
         if(connection != NULL)
         {
           g_signal_emit(
