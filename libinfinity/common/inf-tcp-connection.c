@@ -502,13 +502,31 @@ inf_tcp_connection_init(GTypeInstance* instance,
   priv->status = INF_TCP_CONNECTION_CLOSED;
   priv->socket = INVALID_SOCKET;
   priv->keepalive = 1;
-  priv->default_keepalive = -1;
   priv->keepalive_time = 15;
-  priv->default_keepalive_time = -1;
   priv->keepalive_interval = 15;
-  priv->default_keepalive_interval = -1;
   priv->keepalive_probes = 2;
+
+#ifndef G_OS_WIN32
+  priv->default_keepalive = -1;
+  priv->default_keepalive_time = -1;
+  priv->default_keepalive_interval = -1;
   priv->default_keepalive_probes = -1;
+#else
+  /* to avoid problems with non-blocking sockets the default values for
+   * windows are hard coded.
+   * see http://msdn.microsoft.com/en-us/library/ee470551(v=VS.85).aspx
+   */
+  priv->default_keepalive = 0;
+  priv->default_keepalive_time = 2 * 60 * 60; /* 2 hours */
+  priv->default_keepalive_interval = 1;
+  /* leaving probes -1 because it cannot changed with socket functions:
+   * - On Windows Server 2003, Windows XP, and Windows 2000:
+   * default = 5 and could be changed through the registry
+   * - On Windows Vista and later:
+   * default = 10 and cannot be changed
+   * see http://msdn.microsoft.com/en-us/library/ee470551(v=VS.85).aspx */
+  priv->default_keepalive_probes = -1;
+#endif
 
   priv->remote_address = NULL;
   priv->remote_port = 0;
@@ -560,6 +578,103 @@ inf_tcp_connection_finalize(GObject* object)
 
   G_OBJECT_CLASS(parent_class)->finalize(object);
 }
+
+#if defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS)
+
+static gboolean
+inf_tcp_connection_get_keepalive_win32(InfTcpConnection* connection,
+                                       gint* activate,
+                                       gint* time,
+                                       gint* interval)
+{
+  InfTcpConnectionPrivate* priv;
+  struct tcp_keepalive values;
+  DWORD retsize;
+  int ret;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  ret = WSAIoctl(
+    priv->socket,
+    SIO_KEEPALIVE_VALS,
+    NULL,
+    0,
+    (LPVOID) &values,
+    sizeof(values),
+    &retsize,
+    NULL,
+    NULL
+  );
+
+  if(ret != 0){
+    /* ret could be WSAEWOULDBLOCK, so:
+     * TODO: add proper handling for non-blocking sockets (e.g. temp. set non-blocking)
+     * For now we ignore this message and return a fail status. */
+    return FALSE;
+  }
+
+  if(activate != NULL)
+    *activate = values.on;
+
+  if(time != NULL)
+    *time = values.keepalivetime;
+
+  if(interval != NULL)
+    *interval = values.keepaliveinterval;
+
+  return TRUE;
+}
+
+static gboolean
+inf_tcp_connection_set_keepalive_win32(InfTcpConnection* connection,
+                                       gint activate,
+                                       gint time,
+                                       gint interval)
+{
+  InfTcpConnectionPrivate* priv;
+  struct tcp_keepalive values;
+  DWORD retsize;
+  int ret;
+
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  /* use default values if values are out of range (see inf_tcp_connection_init) */
+  if(time <= 0)
+    time = priv->default_keepalive_time;
+  if(interval <= 0)
+    interval = priv->default_keepalive_interval;
+
+  /* windows uses time in milliseconds */
+  values.onoff = 1;
+  values.keepalivetime = idle * 1000;
+  values.keepaliveinterval = interval * 1000;
+
+  ret = WSAIoctl(
+    priv->socket,
+    SIO_KEEPALIVE_VALS,
+    (LPVOID) &values,
+    sizeof(values),
+    NULL,
+    0,
+    &retsize,
+    NULL,
+    NULL
+  );
+
+  if(ret != 0){
+    /* TODO: add proper handling for non-blocking sockets (e.g. temp. set non-blocking)
+     * For now we ignore this message and assume that it will be finished soon. */
+    if(ret == WSAEWOULDBLOCK) {
+      return TRUE;
+    } else {
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
+#endif
 
 static gint
 inf_tcp_connection_get_keepalive(InfTcpConnection* connection)
@@ -640,18 +755,30 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
   if(priv->socket == INVALID_SOCKET)
     return -1;
 
-#ifdef TCP_KEEPIDLE
+#if defined(TCP_KEEPIDLE) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
+
+#ifndef G_OS_WIN32
+
   len = sizeof(time);
   if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, &len) < 0)
   {
     return -1;
   }
 
+#else /* G_OS_WIN32 */
+
+  if(inf_tcp_connection_get_keepalive_win32(connection, NULL, &time, NULL) == FALSE)
+  {
+    return -1;
+  }
+
+#endif /* G_OS_WIN32 */
+
   return time;
-#else
-  /* not supported */
+
+#else /* not supported */
   return -1;
-#endif /* TCP_KEEPIDLE */
+#endif
 }
 
 static gboolean
@@ -682,19 +809,29 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
     }
   }
 
-#ifdef TCP_KEEPIDLE
+#if defined(TCP_KEEPIDLE) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
+
+#ifndef G_OS_WIN32
+
   if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPIDLE, &time, (socklen_t) sizeof(time)) < 0)
   {
     return FALSE;
   }
 
-#else
-  /* not supported */
-  if (time != 0)
+#else /* G_OS_WIN32 */
+
+  if(inf_tcp_connection_set_keepalive_win32(connection, priv->keepalive, priv->keepalive_time, priv->keepalive_interval) == FALSE)
+  {
     return FALSE;
-#endif /* TCP_KEEPIDLE */
+  }
+
+#endif /* G_OS_WIN32 */
 
   return TRUE;
+
+#else /* not supported */
+  return FALSE;
+#endif
 }
 
 static gint
@@ -714,18 +851,30 @@ inf_tcp_connection_get_keepalive_interval(InfTcpConnection* connection)
   if(priv->socket == INVALID_SOCKET)
     return -1;
 
-#ifdef TCP_KEEPINTVL
+#if defined(TCP_KEEPINTVL) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
+
+#ifndef G_OS_WIN32
+
   len = sizeof(interval);
   if(getsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, &len) < 0)
   {
     return -1;
   }
 
+#else /* G_OS_WIN32 */
+
+  if(inf_tcp_connection_get_keepalive_win32(connection, NULL, NULL, &interval) == FALSE)
+  {
+    return -1;
+  }
+
+#endif /* G_OS_WIN32 */
+
   return interval;
-#else
-  /* not supported */
+
+#else /* not supported */
   return -1;
-#endif /* TCP_KEEPINTVL */
+#endif
 }
 
 static gboolean
@@ -756,19 +905,29 @@ inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
     }
   }
 
-#ifdef TCP_KEEPINTVL
+#if defined(TCP_KEEPINTVL) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
+
+#ifndef G_OS_WIN32
+
   if(setsockopt(priv->socket, IPPROTO_TCP, TCP_KEEPINTVL, &interval, (socklen_t) sizeof(interval)) < 0)
   {
     return FALSE;
   }
 
-#else
-  /* not supported */
-  if (interval != 0)
+#else /* G_OS_WIN32 */
+
+  if(inf_tcp_connection_set_keepalive_win32(connection, priv->keepalive, priv->keepalive_time, priv->keepalive_interval) == FALSE)
+  {
     return FALSE;
-#endif /* TCP_KEEPINTVL */
+  }
+
+#endif /* G_OS_WIN32 */
 
   return TRUE;
+
+#else /* not supported */
+  return FALSE;
+#endif /* TCP_KEEPINTVL */
 }
 
 static gint
@@ -796,8 +955,7 @@ inf_tcp_connection_get_keepalive_probes(InfTcpConnection* connection)
   }
 
   return probes;
-#else
-  /* not supported */
+#else /* not supported */
   return -1;
 #endif /* TCP_KEEPCNT */
 }
@@ -836,13 +994,11 @@ inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
     return FALSE;
   }
 
-#else
-  /* not supported */
-  if(probes != 0)
-    return FALSE;
-#endif /* TCP_KEEPCNT */
-
   return TRUE;
+
+#else /* not supported */
+  return FALSE;
+#endif /* TCP_KEEPCNT */
 }
 
 static void
