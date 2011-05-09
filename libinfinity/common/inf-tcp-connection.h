@@ -77,6 +77,11 @@ inf_tcp_connection_new(InfIo* io,
                        guint remote_port);
 
 InfTcpConnection*
+inf_tcp_connection_new_from_hostname(InfIo *io,
+                                     const gchar* remote_host,
+                                     guint remote_port);
+
+InfTcpConnection*
 inf_tcp_connection_new_and_open(InfIo* io,
                                 InfIpAddress* remote_addr,
                                 guint remote_port,
@@ -89,6 +94,10 @@ inf_tcp_connection_open(InfTcpConnection* connection,
 void
 inf_tcp_connection_close(InfTcpConnection* connection);
 
+gboolean
+inf_tcp_connection_resolve(InfTcpConnection* connection,
+                           GError** error);
+
 void
 inf_tcp_connection_send(InfTcpConnection* connection,
                         gconstpointer data,
@@ -96,6 +105,9 @@ inf_tcp_connection_send(InfTcpConnection* connection,
 
 InfIpAddress*
 inf_tcp_connection_get_remote_address(InfTcpConnection* connection);
+
+gchar*
+inf_tcp_connection_get_remote_host(InfTcpConnection* connection);
 
 guint
 inf_tcp_connection_get_remote_port(InfTcpConnection* connection);
