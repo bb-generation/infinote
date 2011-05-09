@@ -112,6 +112,7 @@ infinoted_run_create_server(InfinotedRun* run,
       "io", INF_IO(run->io),
       "local-address", address,
       "local-port", startup->options->port,
+      "keepalive", startup->options->keepalive,
       NULL
     )
   );
