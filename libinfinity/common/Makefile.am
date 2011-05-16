@@ -22,6 +22,7 @@ libinfinity_common_la_SOURCES = \
 	inf-io.c \
 	inf-ip-address.c \
 	inf-local-publisher.c \
+	inf-keepalive.c \
 	inf-protocol.c \
 	inf-sasl-context.c \
 	inf-session.c \
@@ -48,6 +49,7 @@ libinfinity_common_la_HEADERS = \
 	inf-init.h \
 	inf-io.h \
 	inf-ip-address.h \
+	inf-keepalive.h \
 	inf-local-publisher.h \
 	inf-protocol.h \
 	inf-sasl-context.h \
