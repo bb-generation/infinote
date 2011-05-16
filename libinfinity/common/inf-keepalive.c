@@ -25,10 +25,10 @@ inf_keepalive_new(void)
 {
   InfKeepalive* keepalive;
   keepalive = g_slice_new(InfKeepalive);
-  keepalive->use_keepalive = 1;
-  keepalive->keepalive_time = 15;
-  keepalive->keepalive_interval = 15;
-  keepalive->keepalive_probes = 2;
+  keepalive->use_keepalive = INF_KEEPALIVE_USE_DEFAULT;
+  keepalive->keepalive_time = INF_KEEPALIVE_TIME_DEFAULT;
+  keepalive->keepalive_interval = INF_KEEPALIVE_INTERVAL_DEFAULT;
+  keepalive->keepalive_probes = INF_KEEPALIVE_PROBES_DEFAULT;
   return keepalive;
 }
 
@@ -52,7 +52,7 @@ inf_keepalive_get_type(void)
 InfKeepalive*
 inf_keepalive_copy(const InfKeepalive* keepalive)
 {
-  InfKeepalive* keepalive_new = inf_keepalive_new();
+  InfKeepalive* keepalive_new = g_slice_new(InfKeepalive);
   keepalive_new->use_keepalive = keepalive->use_keepalive;
   keepalive_new->keepalive_time = keepalive->keepalive_time;
   keepalive_new->keepalive_interval = keepalive->keepalive_interval;

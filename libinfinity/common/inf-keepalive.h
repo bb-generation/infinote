@@ -24,6 +24,12 @@
 
 G_BEGIN_DECLS
 
+#define INF_KEEPALIVE_USE_DEFAULT 1
+#define INF_KEEPALIVE_TIME_DEFAULT 15
+#define INF_KEEPALIVE_INTERVAL_DEFAULT 15
+#define INF_KEEPALIVE_PROBES_DEFAULT 2
+
+
 #define INF_TYPE_KEEPALIVE                 (inf_keepalive_get_type())
 
 typedef struct _InfKeepalive InfKeepalive;
