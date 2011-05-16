@@ -21,6 +21,7 @@
 #define __INFINOTED_OPTIONS_H__
 
 #include <libinfinity/common/inf-xmpp-connection.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/inf-config.h>
 
 #include <glib.h>
@@ -51,6 +52,9 @@ struct _InfinotedOptions {
 #ifdef LIBINFINITY_HAVE_LIBDAEMON
   gboolean daemonize;
 #endif
+
+  InfKeepalive* keepalive;
+
 };
 
 typedef enum _InfinotedOptionsError {

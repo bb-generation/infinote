@@ -21,6 +21,7 @@
 #include <libinfinity/common/inf-tcp-connection-private.h>
 #include <libinfinity/common/inf-ip-address.h>
 #include <libinfinity/common/inf-io.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/inf-marshal.h>
 #include <config.h>
 
@@ -60,6 +61,7 @@ struct _InfdTcpServerPrivate {
 
   InfIpAddress* local_address;
   guint local_port;
+  InfKeepalive* keepalive;
 };
 
 enum {
@@ -70,7 +72,9 @@ enum {
   PROP_STATUS,
 
   PROP_LOCAL_ADDRESS,
-  PROP_LOCAL_PORT
+  PROP_LOCAL_PORT,
+
+  PROP_KEEPALIVE
 };
 
 enum {
@@ -246,6 +250,20 @@ infd_tcp_server_io(InfNativeSocket* socket,
 
         if(connection != NULL)
         {
+          if(priv->keepalive != NULL)
+          {
+            g_object_set(G_OBJECT(connection),
+                          "keepalive",
+                          priv->keepalive->use_keepalive,
+                          "keepalive-time",
+                          priv->keepalive->keepalive_time,
+                          "keepalive-interval",
+                          priv->keepalive->keepalive_interval,
+                          "keepalive-probes",
+                          priv->keepalive->keepalive_probes,
+                          NULL);
+          }
+
           g_signal_emit(
             G_OBJECT(server),
             tcp_server_signals[NEW_CONNECTION],
@@ -293,6 +311,8 @@ infd_tcp_server_init(GTypeInstance* instance,
 
   priv->local_address = NULL;
   priv->local_port = 0;
+
+  priv->keepalive = NULL;
 }
 
 static void
@@ -328,6 +348,9 @@ infd_tcp_server_finalize(GObject* object)
   if(priv->local_address != NULL)
     inf_ip_address_free(priv->local_address);
 
+  if(priv->keepalive != NULL)
+    inf_keepalive_free(priv->keepalive);
+
   G_OBJECT_CLASS(parent_class)->finalize(object);
 }
 
@@ -360,6 +383,10 @@ infd_tcp_server_set_property(GObject* object,
     g_assert(priv->status == INFD_TCP_SERVER_CLOSED);
     priv->local_port = g_value_get_uint(value);
     break;
+  case PROP_KEEPALIVE:
+    g_assert(priv->status == INFD_TCP_SERVER_CLOSED);
+    priv->keepalive = (InfKeepalive*)g_value_dup_boxed(value);
+    break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
     break;
@@ -391,6 +418,9 @@ infd_tcp_server_get_property(GObject* object,
     break;
   case PROP_LOCAL_PORT:
     g_value_set_uint(value, priv->local_port);
+    break;
+  case PROP_KEEPALIVE:
+    g_value_set_static_boxed(value, priv->keepalive);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -498,6 +528,18 @@ infd_tcp_server_class_init(gpointer g_class,
       65535,
       0,
       G_PARAM_READWRITE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_KEEPALIVE,
+    g_param_spec_boxed(
+      "keepalive",
+      "Keepalive",
+      "Keepalive values to use",
+      INF_TYPE_KEEPALIVE,
+      G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY
     )
   );
 

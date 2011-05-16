@@ -669,6 +669,21 @@ infinoted_options_load(InfinotedOptions* options,
       G_OPTION_ARG_NONE, NULL,
       N_("Kill a running daemon"), NULL },
 #endif
+    { "keepalive", 'K', 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("If set keepalive messages will be sent periodically to check "
+          "for disconnected clients"), NULL },
+    { "keepalive-time", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Interval between last package and first probe (in seconds)"),
+      NULL },
+    { "keepalive-interval", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Interval between subsequent probes (in seconds)"), NULL },
+    { "keepalive-probes", 0, 0,
+      G_OPTION_ARG_INT, NULL,
+      N_("Number of unacknowledged probes to consider a connection down"),
+      NULL },
     { "version", 'v', G_OPTION_FLAG_NO_CONFIG_FILE,
       G_OPTION_ARG_NONE, NULL,
       N_("Display version information and exit"), NULL },
@@ -700,6 +715,10 @@ infinoted_options_load(InfinotedOptions* options,
   entries[i++].arg_data = &options->daemonize;
   entries[i++].arg_data = &kill_daemon;
 #endif
+  entries[i++].arg_data = &options->keepalive->use_keepalive;
+  entries[i++].arg_data = &options->keepalive->keepalive_time;
+  entries[i++].arg_data = &options->keepalive->keepalive_interval;
+  entries[i++].arg_data = &options->keepalive->keepalive_probes;
   entries[i++].arg_data = &display_version;
 
   display_version = FALSE;
@@ -896,6 +915,8 @@ infinoted_options_new(const gchar* const* config_files,
   options->daemonize = FALSE;
 #endif
 
+  options->keepalive = inf_keepalive_new();
+
   if(!infinoted_options_load(options, config_files, argc, argv, error))
   {
     infinoted_options_free(options);
@@ -925,6 +946,7 @@ infinoted_options_free(InfinotedOptions* options)
   g_strfreev(options->pam_allowed_groups);
 #endif
   g_free(options->sync_directory);
+  inf_keepalive_free(options->keepalive);
   g_slice_free(InfinotedOptions, options);
 }
 
