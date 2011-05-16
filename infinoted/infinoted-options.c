@@ -916,6 +916,10 @@ infinoted_options_new(const gchar* const* config_files,
 #endif
 
   options->keepalive = inf_keepalive_new();
+  /* XXX: deactivated keepalive because of an assertion error in
+   * inf_xmpp_connection_xml_connection_send. The status was
+   * INF_XMPP_CONNECTION_CLOSED. Maybe an sync problem?  */
+  options->keepalive->use_keepalive = 0;
 
   if(!infinoted_options_load(options, config_files, argc, argv, error))
   {

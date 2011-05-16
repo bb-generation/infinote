@@ -21,6 +21,7 @@
 #include <libinfinity/common/inf-tcp-connection-private.h>
 #include <libinfinity/common/inf-ip-address.h>
 #include <libinfinity/common/inf-io.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/inf-marshal.h>
 #include <libinfinity/inf-i18n.h>
 
@@ -79,22 +80,8 @@ struct _InfTcpConnectionPrivate {
   guint remote_port;
   unsigned int device_index;
 
-  /* keepalive state */
-  gint keepalive;
-  gint default_keepalive;
-  /* the interval between the last data packet sent and the first keepalive
-   * probe
-   */
-  gint keepalive_time;
-  gint default_keepalive_time;
-  /* the interval between subsequential keepalive probes */
-  gint keepalive_interval;
-  gint default_keepalive_interval;
-  /* the number of unacknowledged probes to send before considering the
-   * connection dead and notifying the application layer
-   */
-  gint keepalive_probes;
-  gint default_keepalive_probes;
+  InfKeepalive* keepalive;
+  InfKeepalive* default_keepalive;
 
   guint8* queue;
   gsize front_pos;
@@ -117,10 +104,7 @@ enum {
   PROP_DEVICE_INDEX,
   PROP_DEVICE_NAME,
 
-  PROP_KEEPALIVE,
-  PROP_KEEPALIVE_TIME,
-  PROP_KEEPALIVE_INTERVAL,
-  PROP_KEEPALIVE_PROBES
+  PROP_KEEPALIVE
 };
 
 enum {
@@ -501,31 +485,29 @@ inf_tcp_connection_init(GTypeInstance* instance,
   priv->watch = NULL;
   priv->status = INF_TCP_CONNECTION_CLOSED;
   priv->socket = INVALID_SOCKET;
-  priv->keepalive = 1;
-  priv->keepalive_time = 15;
-  priv->keepalive_interval = 15;
-  priv->keepalive_probes = 2;
+  priv->keepalive = inf_keepalive_new();
+  priv->default_keepalive = inf_keepalive_new();
 
 #ifndef G_OS_WIN32
-  priv->default_keepalive = -1;
-  priv->default_keepalive_time = -1;
-  priv->default_keepalive_interval = -1;
-  priv->default_keepalive_probes = -1;
+  priv->default_keepalive->use_keepalive = -1;
+  priv->default_keepalive->keepalive_time = -1;
+  priv->default_keepalive->keepalive_interval = -1;
+  priv->default_keepalive->keepalive_probes = -1;
 #else
   /* to avoid problems with non-blocking sockets the default values for
    * windows are hard coded.
    * see http://msdn.microsoft.com/en-us/library/ee470551(v=VS.85).aspx
    */
-  priv->default_keepalive = 0;
-  priv->default_keepalive_time = 2 * 60 * 60; /* 2 hours */
-  priv->default_keepalive_interval = 1;
+  priv->default_keepalive->use_keepalive = 0;
+  priv->default_keepalive->keepalive_time = 2 * 60 * 60; /* 2 hours */
+  priv->default_keepalive->keepalive_interval = 1;
   /* leaving probes -1 because it cannot changed with socket functions:
    * - On Windows Server 2003, Windows XP, and Windows 2000:
    * default = 5 and could be changed through the registry
    * - On Windows Vista and later:
    * default = 10 and cannot be changed
    * see http://msdn.microsoft.com/en-us/library/ee470551(v=VS.85).aspx */
-  priv->default_keepalive_probes = -1;
+  priv->default_keepalive->keepalive_probes = -1;
 #endif
 
   priv->remote_address = NULL;
@@ -555,6 +537,9 @@ inf_tcp_connection_dispose(GObject* object)
     g_object_unref(G_OBJECT(priv->io));
     priv->io = NULL;
   }
+
+  inf_keepalive_free(priv->keepalive);
+  inf_keepalive_free(priv->default_keepalive);
 
   G_OBJECT_CLASS(parent_class)->dispose(object);
 }
@@ -640,9 +625,9 @@ inf_tcp_connection_set_keepalive_win32(InfTcpConnection* connection,
 
   /* use default values if values are out of range (see inf_tcp_connection_init) */
   if(time <= 0)
-    time = priv->default_keepalive_time;
+    time = priv->default_keepalive->keepalive_time;
   if(interval <= 0)
-    interval = priv->default_keepalive_interval;
+    interval = priv->default_keepalive->keepalive_interval;
 
   /* windows uses time in milliseconds */
   values.onoff = 1;
@@ -686,8 +671,8 @@ inf_tcp_connection_get_keepalive(InfTcpConnection* connection)
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
   /* if set return os default */
-  if(priv->keepalive == -1 && priv->default_keepalive != -1)
-    return priv->default_keepalive;
+  if(priv->keepalive->use_keepalive == -1 && priv->default_keepalive->use_keepalive != -1)
+    return priv->default_keepalive->use_keepalive;
 
   /* TODO: other way to get os default? */
   if(priv->socket == INVALID_SOCKET)
@@ -716,17 +701,17 @@ inf_tcp_connection_set_keepalive(InfTcpConnection* connection,
   if(activate == -1)
   {
     /* if os default is set, use that value */
-    if(priv->default_keepalive != -1)
-      activate = priv->default_keepalive;
+    if(priv->default_keepalive->use_keepalive != -1)
+      activate = priv->default_keepalive->use_keepalive;
     else
       return FALSE;
   }
   else
   {
     /* try to save os default, if it fails the value remains -1 */
-    if(priv->default_keepalive == -1)
+    if(priv->default_keepalive->use_keepalive == -1)
     {
-      priv->default_keepalive = inf_tcp_connection_get_keepalive(connection);
+      priv->default_keepalive->use_keepalive = inf_tcp_connection_get_keepalive(connection);
     }
   }
 
@@ -748,8 +733,8 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
   /* if set return os default */
-  if(priv->keepalive_time == -1 && priv->default_keepalive_time != -1)
-    return priv->default_keepalive_time;
+  if(priv->keepalive->keepalive_time == -1 && priv->default_keepalive->keepalive_time != -1)
+    return priv->default_keepalive->keepalive_time;
 
   /* TODO: other way to get os default? */
   if(priv->socket == INVALID_SOCKET)
@@ -809,17 +794,17 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
   if(time == -1)
   {
     /* if os default is set, use that value */
-    if(priv->default_keepalive_time != -1)
-      time = priv->default_keepalive_time;
+    if(priv->default_keepalive->keepalive_time != -1)
+      time = priv->default_keepalive->keepalive_time;
     else
       return FALSE;
   }
   else
   {
     /* try to save os default, if it fails the value remains -1 */
-    if(priv->default_keepalive_time == -1)
+    if(priv->default_keepalive->keepalive_time == -1)
     {
-      priv->default_keepalive_time = inf_tcp_connection_get_keepalive_time(connection);
+      priv->default_keepalive->keepalive_time = inf_tcp_connection_get_keepalive_time(connection);
     }
   }
 
@@ -871,8 +856,8 @@ inf_tcp_connection_get_keepalive_interval(InfTcpConnection* connection)
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
   /* if set return os default */
-  if(priv->keepalive_interval == -1 && priv->default_keepalive_interval != -1)
-    return priv->default_keepalive_interval;
+  if(priv->keepalive->keepalive_interval == -1 && priv->default_keepalive->keepalive_interval != -1)
+    return priv->default_keepalive->keepalive_interval;
 
   /* TODO: other way to get os default? */
   if(priv->socket == INVALID_SOCKET)
@@ -918,17 +903,17 @@ inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
   if(interval == -1)
   {
     /* if os default is set, use that value */
-    if(priv->default_keepalive_interval != -1)
-      interval = priv->default_keepalive_interval;
+    if(priv->default_keepalive->keepalive_interval != -1)
+      interval = priv->default_keepalive->keepalive_interval;
     else
       return FALSE;
   }
   else
   {
     /* try to save os default, if it fails the value remains -1 */
-    if(priv->default_keepalive_interval == -1)
+    if(priv->default_keepalive->keepalive_interval == -1)
     {
-      priv->default_keepalive_interval = inf_tcp_connection_get_keepalive_interval(connection);
+      priv->default_keepalive->keepalive_interval = inf_tcp_connection_get_keepalive_interval(connection);
     }
   }
 
@@ -967,8 +952,8 @@ inf_tcp_connection_get_keepalive_probes(InfTcpConnection* connection)
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
 
   /* if set return os default */
-  if(priv->keepalive_probes == -1 && priv->default_keepalive_probes != -1)
-    return priv->default_keepalive_probes;
+  if(priv->keepalive->keepalive_probes == -1 && priv->default_keepalive->keepalive_probes != -1)
+    return priv->default_keepalive->keepalive_probes;
 
   /* TODO: other way to get os default? */
   if(priv->socket == INVALID_SOCKET)
@@ -1001,17 +986,17 @@ inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
   if(probes == -1)
   {
     /* if os default is set, use that value */
-    if(priv->default_keepalive_probes != -1)
-      probes = priv->default_keepalive_probes;
+    if(priv->default_keepalive->keepalive_probes != -1)
+      probes = priv->default_keepalive->keepalive_probes;
     else
       return FALSE;
   }
   else
   {
     /* try to save os default, if it fails the value remains -1 */
-    if(priv->default_keepalive_probes == -1)
+    if(priv->default_keepalive->keepalive_probes == -1)
     {
-      priv->default_keepalive_probes = inf_tcp_connection_get_keepalive_probes(connection);
+      priv->default_keepalive->keepalive_probes = inf_tcp_connection_get_keepalive_probes(connection);
     }
   }
 
@@ -1089,24 +1074,14 @@ inf_tcp_connection_set_property(GObject* object,
 #endif
     break;
   case PROP_KEEPALIVE:
-    priv->keepalive = g_value_get_int(value);
+    if(priv->keepalive != NULL)
+      inf_keepalive_free(priv->keepalive);
+    priv->keepalive = (InfKeepalive*)g_value_dup_boxed(value);
 
-    inf_tcp_connection_set_keepalive(connection, priv->keepalive);
-    break;
-  case PROP_KEEPALIVE_TIME:
-    priv->keepalive_time = g_value_get_int(value);
-
-    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive_time);
-    break;
-  case PROP_KEEPALIVE_INTERVAL:
-    priv->keepalive_interval = g_value_get_int(value);
-
-    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive_interval);
-    break;
-  case PROP_KEEPALIVE_PROBES:
-    priv->keepalive_probes = g_value_get_int(value);
-
-    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive_probes);
+    inf_tcp_connection_set_keepalive(connection, priv->keepalive->use_keepalive);
+    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive->keepalive_time);
+    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive->keepalive_interval);
+    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive->keepalive_probes);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -1189,32 +1164,7 @@ inf_tcp_connection_get_property(GObject* object,
 #endif
     break;
   case PROP_KEEPALIVE:
-    if(priv->keepalive == -1)
-      g_value_set_int(value, inf_tcp_connection_get_keepalive(connection));
-    else
-      /* TODO: call inf_tcp_connection_get_keepalive? */
-      g_value_set_int(value, priv->keepalive);
-    break;
-  case PROP_KEEPALIVE_TIME:
-    if(priv->keepalive_time == -1)
-      g_value_set_int(value, inf_tcp_connection_get_keepalive_time(connection));
-    else
-      /* TODO: call inf_tcp_connection_get_keepalive_time? */
-      g_value_set_int(value, priv->keepalive_time);
-    break;
-  case PROP_KEEPALIVE_INTERVAL:
-    if(priv->keepalive_interval == -1)
-      g_value_set_int(value, inf_tcp_connection_get_keepalive_interval(connection));
-    else
-      /* TODO: call inf_tcp_connection_get_keepalive_interval? */
-      g_value_set_int(value, priv->keepalive_interval);
-    break;
-  case PROP_KEEPALIVE_PROBES:
-    if(priv->keepalive_probes == -1)
-      g_value_set_int(value, inf_tcp_connection_get_keepalive_probes(connection));
-    else
-      /* TODO: call inf_tcp_connection_get_keepalive_probes? */
-      g_value_set_int(value, priv->keepalive_probes);
+    g_value_set_static_boxed(value, priv->keepalive);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -1379,55 +1329,11 @@ inf_tcp_connection_class_init(gpointer g_class,
   g_object_class_install_property(
     object_class,
     PROP_KEEPALIVE,
-    g_param_spec_int(
+    g_param_spec_boxed(
       "keepalive",
       "Keepalive",
-      "When turned on (1) the connection will be checked periodically if it is still operating",
-      -1,
-      1,
-      1,
-      G_PARAM_READWRITE
-    )
-  );
-
-  g_object_class_install_property(
-    object_class,
-    PROP_KEEPALIVE_TIME,
-    g_param_spec_int(
-      "keepalive-time",
-      "Keepalive time",
-      "The time in seconds between the last data packet sent and the first keepalive probe",
-      -1,
-      G_MAXINT,
-      15,
-      G_PARAM_READWRITE
-    )
-  );
-
-  g_object_class_install_property(
-    object_class,
-    PROP_KEEPALIVE_INTERVAL,
-    g_param_spec_int(
-      "keepalive-interval",
-      "Keepalive interval",
-      "The time in seconds after a new keepalive probe will be sent if the previous one was successfully retrieved",
-      -1,
-      G_MAXINT,
-      15,
-      G_PARAM_READWRITE
-    )
-  );
-
-  g_object_class_install_property(
-    object_class,
-    PROP_KEEPALIVE_PROBES,
-    g_param_spec_int(
-      "keepalive-probes",
-      "Keepalive probes",
-      "The number of retries before the connection is declared as closed",
-      -1,
-      G_MAXINT,
-      2,
+      "Keepalive values to use",
+      INF_TYPE_KEEPALIVE,
       G_PARAM_READWRITE
     )
   );
@@ -1759,14 +1665,14 @@ inf_tcp_connection_open(InfTcpConnection* connection,
 #endif
 
   /* set socket options for keepalive if not -1 (= use os default) */
-  if (priv->keepalive != -1)
-    inf_tcp_connection_set_keepalive(connection, priv->keepalive);
-  if (priv->keepalive_time != -1)
-    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive_time);
-  if (priv->keepalive_interval != -1)
-    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive_interval);
-  if (priv->keepalive_probes != -1)
-    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive_probes);
+  if (priv->keepalive->use_keepalive != -1)
+    inf_tcp_connection_set_keepalive(connection, priv->keepalive->use_keepalive);
+  if (priv->keepalive->keepalive_time != -1)
+    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive->keepalive_time);
+  if (priv->keepalive->keepalive_interval != -1)
+    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive->keepalive_interval);
+  if (priv->keepalive->keepalive_probes != -1)
+    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive->keepalive_probes);
 
   /* Connect */
   do
@@ -2050,14 +1956,14 @@ _inf_tcp_connection_accepted(InfIo* io,
   priv->socket = socket;
 
   /* set socket options for keepalive if not -1 (= use os default) */
-  if (priv->keepalive != -1)
-    inf_tcp_connection_set_keepalive(connection, priv->keepalive);
-  if (priv->keepalive_time != -1)
-    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive_time);
-  if (priv->keepalive_interval != -1)
-    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive_interval);
-  if (priv->keepalive_probes != -1)
-    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive_probes);
+  if (priv->keepalive->use_keepalive != -1)
+    inf_tcp_connection_set_keepalive(connection, priv->keepalive->use_keepalive);
+  if (priv->keepalive->keepalive_time != -1)
+    inf_tcp_connection_set_keepalive_time(connection, priv->keepalive->keepalive_time);
+  if (priv->keepalive->keepalive_interval != -1)
+    inf_tcp_connection_set_keepalive_interval(connection, priv->keepalive->keepalive_interval);
+  if (priv->keepalive->keepalive_probes != -1)
+    inf_tcp_connection_set_keepalive_probes(connection, priv->keepalive->keepalive_probes);
 
   inf_tcp_connection_connected(connection);
   return connection;
