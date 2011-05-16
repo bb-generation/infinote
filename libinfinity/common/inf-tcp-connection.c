@@ -534,6 +534,7 @@ inf_tcp_connection_finalize(GObject* object)
   if(priv->socket != INVALID_SOCKET)
     closesocket(priv->socket);
 
+  g_free(priv->remote_host);
   g_free(priv->queue);
 
   G_OBJECT_CLASS(parent_class)->finalize(object);
@@ -567,11 +568,15 @@ inf_tcp_connection_set_property(GObject* object,
     if(priv->remote_address != NULL)
       inf_ip_address_free(priv->remote_address);
     priv->remote_address = (InfIpAddress*)g_value_dup_boxed(value);
+    g_free(priv->remote_host);
+    priv->remote_host = NULL;
     break;
   case PROP_REMOTE_HOST:
     g_assert(priv->status == INF_TCP_CONNECTION_CLOSED);
-    //if a host is set, the address must not already be resolved
-    g_assert(priv->remote_address == NULL);
+    if(priv->remote_address != NULL)
+      inf_ip_address_free(priv->remote_address);
+    priv->remote_address = NULL;
+    g_free(priv->remote_host);
     priv->remote_host = g_value_dup_string(value);
     break;
   case PROP_REMOTE_PORT:
@@ -1133,7 +1138,8 @@ inf_tcp_connection_open(InfTcpConnection* connection,
   g_return_val_if_fail(priv->remote_port != 0, FALSE);
 
   if(priv->remote_host != NULL && priv->remote_address == NULL)
-    g_return_val_if_fail(inf_tcp_connection_resolve(connection, error), FALSE);
+    if(!inf_tcp_connection_resolve(connection, error))
+      return FALSE;
 
   g_return_val_if_fail(priv->remote_address != NULL, FALSE);
 
@@ -1310,9 +1316,7 @@ inf_tcp_connection_close(InfTcpConnection* connection)
  * function. Furthermore, "remote-address" must not be set.
  * If an error occurs, the function returns %FALSE and @error is set.
  * Note however that the connection might not be fully open when the function
- * returns (check the "status" property if you need to know). If an asynchronous
- * error occurs while the connection is being opened, the "error" signal
- * is emitted.
+ * returns (check the "status" property if you need to know).
  *
  * Returns: %FALSE if an error occured and %TRUE otherwise.
  **/
@@ -1353,10 +1357,14 @@ inf_tcp_connection_resolve(InfTcpConnection* connection,
   if(val != 0)
   {
     g_assert(res == NULL);
-    inf_tcp_connection_make_system_error(
+    g_set_error(
+      error,
+      inf_tcp_connection_error_quark,
       val,
-      error
+      "%s",
+      gai_strerror(val)
     );
+    return FALSE;
   }
   else
   {
@@ -1385,7 +1393,9 @@ inf_tcp_connection_resolve(InfTcpConnection* connection,
     freeaddrinfo(res);
 
     priv->remote_address = addr;
-    priv->remote_port = port;
+    g_assert(priv->remote_port == port);
+
+    g_object_notify(G_OBJECT(connection), "remote-address");
   }
   return TRUE;
 }
@@ -1528,7 +1538,7 @@ inf_tcp_connection_get_remote_address(InfTcpConnection* connection)
  *
  * Return Value: The hostname of the @connection.
  **/
-gchar*
+const gchar*
 inf_tcp_connection_get_remote_host(InfTcpConnection* connection)
 {
   g_return_val_if_fail(INF_IS_TCP_CONNECTION(connection), NULL);

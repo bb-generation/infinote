@@ -106,7 +106,7 @@ inf_tcp_connection_send(InfTcpConnection* connection,
 InfIpAddress*
 inf_tcp_connection_get_remote_address(InfTcpConnection* connection);
 
-gchar*
+const gchar*
 inf_tcp_connection_get_remote_host(InfTcpConnection* connection);
 
 guint
