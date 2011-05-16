@@ -37,6 +37,7 @@
 #include <libinfinity/inf-i18n.h>
 #include <libinfinity/inf-config.h> /* LIBINFINITY_HAVE_AVAHI */
 
+
 #ifdef LIBINFINITY_HAVE_AVAHI
 
 #include <avahi-client/client.h>
@@ -112,6 +113,7 @@ struct _InfDiscoveryAvahiPrivate {
   AvahiPoll poll;
 
   InfIo* io;
+  InfKeepalive* keepalive;
   InfXmppManager* xmpp_manager;
   InfXmppConnectionSecurityPolicy security_policy;
   InfCertificateCredentials* creds;
@@ -135,7 +137,9 @@ enum {
   PROP_SASL_MECHANISMS,
 
   /* read/write */
-  PROP_SECURITY_POLICY
+  PROP_SECURITY_POLICY,
+
+  PROP_KEEPALIVE
 };
 
 #define INF_DISCOVERY_AVAHI_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE((obj), INF_TYPE_DISCOVERY_AVAHI, InfDiscoveryAvahiPrivate))
@@ -348,7 +352,7 @@ inf_discovery_avahi_service_resolver_callback(AvahiServiceResolver* resolver,
       g_object_set(
         G_OBJECT(tcp),
         "device-index", discovery_info->interface,
-        NULL);
+        "keepalive", priv->keepalive, NULL);
 
       error = NULL;
       if(inf_tcp_connection_open(tcp, &error) == FALSE)
@@ -1083,11 +1087,13 @@ inf_discovery_avahi_init(GTypeInstance* instance,
   priv->poll.timeout_free = inf_discovery_avahi_timeout_free;
 
   priv->io = NULL;
+  priv->keepalive = NULL;
   priv->xmpp_manager = NULL;
   priv->security_policy = INF_XMPP_CONNECTION_SECURITY_BOTH_PREFER_TLS;
   priv->creds = NULL;
   priv->sasl_context = NULL;
   priv->sasl_mechanisms = NULL;
+  priv->keepalive = NULL;
 
   priv->client = NULL;
   priv->published = NULL;
@@ -1171,6 +1177,10 @@ inf_discovery_avahi_dispose(GObject* object)
     priv->io = NULL;
   }
 
+  if(priv->keepalive != NULL) {
+    inf_keepalive_free(priv->keepalive);
+  }
+
   G_OBJECT_CLASS(parent_class)->dispose(object);
 }
 
@@ -1205,6 +1215,10 @@ inf_discovery_avahi_set_property(GObject* object,
   case PROP_IO:
     g_assert(priv->io == NULL); /* construct only */
     priv->io = INF_IO(g_value_dup_object(value));
+    break;
+  case PROP_KEEPALIVE:
+    g_assert(priv->keepalive == NULL); /* construct only */
+    priv->keepalive = (InfKeepalive*)g_value_dup_boxed(value);
     break;
   case PROP_XMPP_MANAGER:
     g_assert(priv->xmpp_manager == NULL); /* construct only */
@@ -1246,6 +1260,9 @@ inf_discovery_avahi_get_property(GObject* object,
   {
   case PROP_IO:
     g_value_set_object(value, G_OBJECT(priv->io));
+    break;
+  case PROP_KEEPALIVE:
+    g_value_set_static_boxed(value, priv->keepalive);
     break;
   case PROP_XMPP_MANAGER:
     g_value_set_object(value, G_OBJECT(priv->xmpp_manager));
@@ -1522,6 +1539,18 @@ inf_discovery_avahi_class_init(gpointer g_class,
 
   g_object_class_install_property(
     object_class,
+    PROP_KEEPALIVE,
+    g_param_spec_boxed(
+      "keepalive",
+      "Keepalive",
+      "Keepalive values to use",
+      INF_TYPE_KEEPALIVE,
+      G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
     PROP_XMPP_MANAGER,
     g_param_spec_object(
       "xmpp-manager",
@@ -1701,7 +1730,8 @@ inf_discovery_avahi_new(InfIo* io,
                         InfXmppManager* manager,
                         InfCertificateCredentials* creds,
                         InfSaslContext* sasl_context,
-                        const gchar* sasl_mechanisms)
+                        const gchar* sasl_mechanisms,
+                        InfKeepalive* keepalive)
 {
   GObject* object;
 
@@ -1715,6 +1745,7 @@ inf_discovery_avahi_new(InfIo* io,
     "credentials", creds,
     "sasl-context", sasl_context,
     "sasl-mechanisms", sasl_mechanisms,
+    "keepalive", keepalive,
     NULL
   );
 

@@ -25,6 +25,7 @@
 #include <libinfinity/server/infd-xml-server.h>
 #include <libinfinity/server/infd-tcp-server.h>
 #include <libinfinity/communication/inf-communication-manager.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/common/inf-standalone-io.h>
 #include <libinfinity/common/inf-protocol.h>
 
@@ -46,6 +47,7 @@ main(int argc, char* argv[])
 #ifdef LIBINFINITY_HAVE_AVAHI
   InfDiscoveryAvahi* avahi;
   InfXmppManager* xmpp_manager;
+  InfKeepalive* keepalive;
 #endif
   GError* error;
 
@@ -96,13 +98,20 @@ main(int argc, char* argv[])
       NULL
     );
 
+
+
     g_object_unref(G_OBJECT(server));
 
     infd_server_pool_add_server(pool, INFD_XML_SERVER(xmpp));
 
 #ifdef LIBINFINITY_HAVE_AVAHI
+    keepalive = inf_keepalive_new();
+    /* disable keepalive */
+    keepalive->use_keepalive = 0;
+
     xmpp_manager = inf_xmpp_manager_new();
-    avahi = inf_discovery_avahi_new(INF_IO(io), xmpp_manager, NULL, NULL, NULL);
+    avahi = inf_discovery_avahi_new(INF_IO(io), xmpp_manager,
+          NULL, NULL, NULL, keepalive);
     g_object_unref(G_OBJECT(xmpp_manager));
 
     infd_server_pool_add_local_publisher(
@@ -110,7 +119,7 @@ main(int argc, char* argv[])
       INFD_XMPP_SERVER(xmpp),
       INF_LOCAL_PUBLISHER(avahi)
     );
-
+    inf_keepalive_free(keepalive);
     g_object_unref(G_OBJECT(avahi));
 #endif
     g_object_unref(G_OBJECT(xmpp));
