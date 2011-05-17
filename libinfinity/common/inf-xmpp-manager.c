@@ -276,15 +276,10 @@ inf_xmpp_manager_dispose_destroy_unresolved(gpointer key,
   manager = INF_XMPP_MANAGER(data);
   connection = INF_XMPP_CONNECTION(value);
 
-  signal_handler_id= g_signal_handler_find(
+  inf_signal_handlers_disconnect_by_func(
     connection,
-    G_SIGNAL_MATCH_DATA,
-    0,0,NULL,NULL,
+    G_CALLBACK(inf_xmpp_manager_dispose_destroy_unresolved),
     manager
-  );
-  g_signal_handler_disconnect(
-    connection,
-    signal_handler_id
   );
 
   return FALSE;
@@ -613,6 +608,7 @@ inf_xmpp_manager_notify_connection_status_cb(GObject* object,
   InfTcpConnectionStatus tcp_status;
   gchar* key;
   gchar* remote_host;
+  gchar* remote_port;
   guint port;
   gulong signal_handler_id;
 
@@ -620,45 +616,44 @@ inf_xmpp_manager_notify_connection_status_cb(GObject* object,
   manager = INF_XMPP_MANAGER(user_data);
   g_object_get(G_OBJECT(connection), "tcp-connection", &tcp, NULL);
   g_object_get(G_OBJECT(tcp), "status", &tcp_status, NULL);
-  /* This handles the following case:
-   * An unresolved host entry is loaded, but not opened.
-   * A resolved connection for the same host is added and opened.
-   * The unresolved host entry is opened.
-   *
-   * Handling: The Connecting is suppressed, if it is already managed. */
+
   if(tcp_status == INF_TCP_CONNECTION_CONNECTING)
   {
+    /* This handles the following case:
+     * An unresolved host entry is loaded, but not opened.
+     * A resolved connection for the same host is added and opened.
+     * The unresolved host entry is opened.
+     *
+     * Handling: The connecting is suppressed if it is already managed. */
     if(inf_xmpp_manager_contains_connection(manager, connection) == TRUE)
+    {
       inf_tcp_connection_close(tcp);
-  }
-  /* A unresolved host entry has finished connecting.
-   * Add the entry to the manager if it is not contained already,
-   * and stop listening to the signal, as well as remove the entry
-   * from the hostbased connection collection. */
-  else if(tcp_status == INF_TCP_CONNECTION_CONNECTED)
-  {
-    if(inf_xmpp_manager_contains_connection(manager, connection) == FALSE)
+    }
+    /* An unresolved host entry is connecting and not already managed.
+     * Add the entry to the manager, stop listening to the signal,
+     * and remove the entry from the hostbased connection collection. */
+    else
+    {
       inf_xmpp_manager_add_connection(manager, connection);
 
-    //Remove the connection from the host based connection list
-    port = inf_tcp_connection_get_remote_port(tcp);
-    priv = INF_XMPP_MANAGER_PRIVATE(manager);
-    remote_host = inf_tcp_connection_get_remote_host(tcp);
-    key = g_strconcat(remote_host, ":", g_strdup_printf("%i", port), NULL);
-    if(g_hash_table_lookup(priv->connections_from_hostname, key) != NULL)
-      g_hash_table_remove(priv->connections_from_hostname, key);
+      //Remove the connection from the host based connection list
+      port = inf_tcp_connection_get_remote_port(tcp);
+      priv = INF_XMPP_MANAGER_PRIVATE(manager);
+      remote_host = inf_tcp_connection_get_remote_host(tcp);
+      remote_port = g_strdup_printf("%i", port);
+      key = g_strconcat(remote_host, ":", remote_port, NULL);
+      if(g_hash_table_lookup(priv->connections_from_hostname, key) != NULL)
+        g_hash_table_remove(priv->connections_from_hostname, key);
 
-    //find and disconnect the signal handler for this connection
-    signal_handler_id= g_signal_handler_find(
-      connection,
-      G_SIGNAL_MATCH_DATA,
-      0,0,NULL,NULL,
-      manager
-    );
-    g_signal_handler_disconnect(
-      connection,
-      signal_handler_id
-    );
+      g_free(remote_port);
+      g_free(key);
+
+      inf_signal_handlers_disconnect_by_func(
+        connection,
+        G_CALLBACK(inf_xmpp_manager_notify_connection_status_cb),
+        manager
+      );
+    }
   }
 
   g_object_unref(tcp);
@@ -683,6 +678,7 @@ inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
   InfTcpConnection* tcp;
   guint port;
   gchar* remote_host;
+  gchar* remote_port;
   gchar* key;
   GHashTable* connections_from_hostname;
 
@@ -690,13 +686,18 @@ inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
 
   port = inf_tcp_connection_get_remote_port(tcp);
   remote_host = inf_tcp_connection_get_remote_host(tcp);
-  key = g_strconcat(remote_host, ":", g_strdup_printf("%i", port), NULL);
+  remote_port = g_strdup_printf("%i", port);
+  key = g_strconcat(remote_host, ":", remote_port, NULL);
+  g_free(remote_port);
 
   priv = INF_XMPP_MANAGER_PRIVATE(manager);
   connections_from_hostname=priv->connections_from_hostname;
-  g_return_if_fail(
-    g_hash_table_lookup(connections_from_hostname, key) == NULL
-  );
+
+  if(g_hash_table_lookup(connections_from_hostname, key) != NULL)
+  {
+    g_free(key);
+    g_return_if_reached();
+  }
 
   g_signal_connect(
     connection,
