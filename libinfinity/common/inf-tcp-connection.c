@@ -121,6 +121,7 @@ enum {
 static GObjectClass* parent_class;
 static guint tcp_connection_signals[LAST_SIGNAL];
 static GQuark inf_tcp_connection_error_quark;
+static GQuark inf_tcp_connection_resolve_error_quark;
 
 static void
 inf_tcp_connection_addr_info(InfNativeSocket socket,
@@ -750,6 +751,10 @@ inf_tcp_connection_class_init(gpointer g_class,
     "INF_TCP_CONNECTION_ERROR"
   );
 
+  inf_tcp_connection_resolve_error_quark = g_quark_from_static_string(
+    "INF_TCP_CONNECTION_RESOLVE_ERROR"
+  );
+
   g_object_class_install_property(
     object_class,
     PROP_IO,
@@ -1326,6 +1331,7 @@ inf_tcp_connection_resolve(InfTcpConnection* connection,
 {
   InfTcpConnectionPrivate* priv;
   struct addrinfo hint;
+  gchar* remote_port;
 
   g_return_val_if_fail(INF_IS_TCP_CONNECTION(connection), FALSE);
   priv = INF_TCP_CONNECTION_PRIVATE(connection);
@@ -1351,15 +1357,17 @@ inf_tcp_connection_resolve(InfTcpConnection* connection,
   hint.ai_next = NULL;
 
   struct addrinfo* res = NULL;
+  remote_port = g_strdup_printf("%i", priv->remote_port);
   int val = getaddrinfo(priv->remote_host,
-                        g_strdup_printf("%i", priv->remote_port),
+                        remote_port,
                         &hint,&res);
+  g_free(remote_port);
   if(val != 0)
   {
     g_assert(res == NULL);
     g_set_error(
       error,
-      inf_tcp_connection_error_quark,
+      inf_tcp_connection_resolve_error_quark,
       val,
       "%s",
       gai_strerror(val)
