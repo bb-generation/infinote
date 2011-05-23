@@ -1093,7 +1093,6 @@ inf_discovery_avahi_init(GTypeInstance* instance,
   priv->creds = NULL;
   priv->sasl_context = NULL;
   priv->sasl_mechanisms = NULL;
-  priv->keepalive = NULL;
 
   priv->client = NULL;
   priv->published = NULL;

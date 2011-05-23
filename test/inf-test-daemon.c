@@ -98,8 +98,6 @@ main(int argc, char* argv[])
       NULL
     );
 
-
-
     g_object_unref(G_OBJECT(server));
 
     infd_server_pool_add_server(pool, INFD_XML_SERVER(xmpp));
