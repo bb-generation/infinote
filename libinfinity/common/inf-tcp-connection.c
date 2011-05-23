@@ -81,6 +81,14 @@ struct _InfTcpConnectionPrivate {
   unsigned int device_index;
 
   InfKeepalive* keepalive;
+  /*
+   * OS Defaults
+   * For Windows the os default values are predefined (documentation).
+   * In other OSes the default values are retrieved before setsockopt is called.
+   * see inf_tcp_connection_init()
+   * TODO: currently the values are retrieved and stored for each connection, try to set it globally.
+   * eg. create the struct on startup and set it's values with the first setsockopts (first connection).
+   */
   InfKeepalive* default_keepalive;
 
   guint8* queue;
@@ -488,6 +496,9 @@ inf_tcp_connection_init(GTypeInstance* instance,
   priv->keepalive = inf_keepalive_new();
   priv->default_keepalive = inf_keepalive_new();
 
+  /*
+   * TODO: set default values globally (also look at the struct on top).
+   */
 #ifndef G_OS_WIN32
   priv->default_keepalive->use_keepalive = -1;
   priv->default_keepalive->keepalive_time = -1;
