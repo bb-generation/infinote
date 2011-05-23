@@ -264,7 +264,7 @@ inf_xmpp_manager_dispose_destroy_func(gpointer key,
   return FALSE;
 }
 
-static gboolean
+static void
 inf_xmpp_manager_dispose_destroy_unresolved(gpointer key,
                                             gpointer value,
                                             gpointer data)
@@ -281,8 +281,6 @@ inf_xmpp_manager_dispose_destroy_unresolved(gpointer key,
     G_CALLBACK(inf_xmpp_manager_dispose_destroy_unresolved),
     manager
   );
-
-  return FALSE;
 }
 
 static void
@@ -607,7 +605,7 @@ inf_xmpp_manager_notify_connection_status_cb(GObject* object,
   InfTcpConnection* tcp;
   InfTcpConnectionStatus tcp_status;
   gchar* key;
-  gchar* remote_host;
+  const gchar* remote_host;
   gchar* remote_port;
   guint port;
   gulong signal_handler_id;
@@ -641,9 +639,10 @@ inf_xmpp_manager_notify_connection_status_cb(GObject* object,
       priv = INF_XMPP_MANAGER_PRIVATE(manager);
       remote_host = inf_tcp_connection_get_remote_host(tcp);
       remote_port = g_strdup_printf("%i", port);
-      key = g_strconcat(remote_host, ":", remote_port, NULL);
-      if(g_hash_table_lookup(priv->connections_from_hostname, key) != NULL)
-        g_hash_table_remove(priv->connections_from_hostname, key);
+      key = g_strdup_printf("%s:%u", remote_host, remote_port);
+      g_object_unref(tcp);
+
+      g_hash_table_remove(priv->connections_from_hostname, key);
 
       g_free(remote_port);
       g_free(key);
@@ -655,8 +654,6 @@ inf_xmpp_manager_notify_connection_status_cb(GObject* object,
       );
     }
   }
-
-  g_object_unref(tcp);
 }
 
 /**
@@ -677,7 +674,7 @@ inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
   InfXmppManagerPrivate* priv;
   InfTcpConnection* tcp;
   guint port;
-  gchar* remote_host;
+  const gchar* remote_host;
   gchar* remote_port;
   gchar* key;
   GHashTable* connections_from_hostname;
@@ -686,29 +683,27 @@ inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
 
   port = inf_tcp_connection_get_remote_port(tcp);
   remote_host = inf_tcp_connection_get_remote_host(tcp);
+
   remote_port = g_strdup_printf("%i", port);
-  key = g_strconcat(remote_host, ":", remote_port, NULL);
+  key = g_strdup_printf("%s:%u", remote_host, remote_port);
   g_free(remote_port);
+  g_object_unref(tcp);
 
   priv = INF_XMPP_MANAGER_PRIVATE(manager);
   connections_from_hostname=priv->connections_from_hostname;
 
-  if(g_hash_table_lookup(connections_from_hostname, key) != NULL)
+  if(g_hash_table_lookup(connections_from_hostname, key) == NULL)
   {
-    g_free(key);
-    g_return_if_reached();
+    g_signal_connect(
+      connection,
+      "notify::status",
+      G_CALLBACK(inf_xmpp_manager_notify_connection_status_cb),
+      manager
+    );
+    g_hash_table_insert(connections_from_hostname, key, connection);
   }
-
-  g_signal_connect(
-    connection,
-    "notify::status",
-    G_CALLBACK(inf_xmpp_manager_notify_connection_status_cb),
-    manager
-  );
-
-  g_hash_table_insert(connections_from_hostname, key, connection);
-
-  g_object_unref(tcp);
+  else
+    g_free(key);
 }
 
 /**
