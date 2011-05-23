@@ -31,6 +31,7 @@
 #include <libinfinity/common/inf-chat-session.h>
 #include <libinfinity/common/inf-error.h>
 #include <libinfinity/common/inf-protocol.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/inf-signals.h>
 #include <libinfinity/common/inf-init.h>
 
@@ -861,6 +862,7 @@ main(int argc,
   InfGtkIo* io;
   InfCommunicationManager* communication_manager;
 #ifdef LIBINFINITY_HAVE_AVAHI
+  InfKeepalive* keepalive;
   InfXmppManager* xmpp_manager;
   InfDiscoveryAvahi* avahi;
 #endif
@@ -886,8 +888,13 @@ main(int argc,
 
   io = inf_gtk_io_new();
 #ifdef LIBINFINITY_HAVE_AVAHI
+  keepalive = inf_keepalive_new();
+  /* disable keepalive */
+  keepalive->use_keepalive = 0;
   xmpp_manager = inf_xmpp_manager_new();
-  avahi = inf_discovery_avahi_new(INF_IO(io), xmpp_manager, NULL, NULL, NULL);
+  avahi = inf_discovery_avahi_new(INF_IO(io), xmpp_manager,
+      NULL, NULL, NULL, keepalive);
+  inf_keepalive_free(keepalive);
   g_object_unref(G_OBJECT(xmpp_manager));
 #endif
 

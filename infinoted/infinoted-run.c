@@ -191,7 +191,8 @@ infinoted_run_new(InfinotedStartup* startup,
     xmpp_manager,
     startup->credentials,
     NULL,
-    NULL
+    NULL,
+    startup->options->keepalive
   );
 
   g_object_unref(xmpp_manager);

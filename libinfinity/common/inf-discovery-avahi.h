@@ -22,6 +22,7 @@
 
 #include <libinfinity/common/inf-xmpp-manager.h>
 #include <libinfinity/common/inf-certificate-credentials.h>
+#include <libinfinity/common/inf-keepalive.h>
 #include <libinfinity/common/inf-io.h>
 #include <libinfinity/inf-config.h> /* For LIBINFINITY_HAVE_AVAHI */
 
@@ -72,7 +73,8 @@ inf_discovery_avahi_new(InfIo* io,
                         InfXmppManager* manager,
                         InfCertificateCredentials* creds,
                         InfSaslContext* sasl_context,
-                        const gchar* sasl_mechanisms);
+                        const gchar* sasl_mechanisms,
+                        InfKeepalive* keepalive);
 
 void
 inf_discovery_avahi_set_security_policy(InfDiscoveryAvahi* discovery,
