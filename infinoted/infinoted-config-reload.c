@@ -112,6 +112,7 @@ infinoted_config_reload(InfinotedRun* run,
       "io", run->io,
       "local-address", addr,
       "local-port", startup->options->port,
+      "keepalive", startup->options->keepalive,
       NULL
     );
     inf_ip_address_free(addr);
@@ -127,6 +128,7 @@ infinoted_config_reload(InfinotedRun* run,
       "io", run->io,
       "local-address", NULL,
       "local-port", startup->options->port,
+      "keepalive", startup->options->keepalive,
       NULL
     );
 
