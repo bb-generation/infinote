@@ -63,6 +63,7 @@ struct _InfXmppManagerKeyChangedForeachFuncData {
 typedef struct _InfXmppManagerPrivate InfXmppManagerPrivate;
 struct _InfXmppManagerPrivate {
   GTree* connections;
+  GHashTable* connections_from_hostname;
 };
 
 enum {
@@ -264,6 +265,25 @@ inf_xmpp_manager_dispose_destroy_func(gpointer key,
 }
 
 static void
+inf_xmpp_manager_dispose_destroy_unresolved(gpointer key,
+                                            gpointer value,
+                                            gpointer data)
+{
+  InfXmppManager* manager;
+  InfXmppConnection* connection;
+  gulong signal_handler_id;
+
+  manager = INF_XMPP_MANAGER(data);
+  connection = INF_XMPP_CONNECTION(value);
+
+  inf_signal_handlers_disconnect_by_func(
+    connection,
+    G_CALLBACK(inf_xmpp_manager_dispose_destroy_unresolved),
+    manager
+  );
+}
+
+static void
 inf_xmpp_manager_init(GTypeInstance* instance,
                       gpointer g_class)
 {
@@ -279,6 +299,13 @@ inf_xmpp_manager_init(GTypeInstance* instance,
     inf_xmpp_manager_key_cmp,
     NULL,
     inf_xmpp_manager_key_free,
+    NULL
+  );
+
+  priv->connections_from_hostname = g_hash_table_new_full(
+    g_str_hash,
+    g_str_equal,
+    g_free,
     NULL
   );
 }
@@ -298,8 +325,17 @@ inf_xmpp_manager_dispose(GObject* object)
     manager
   );
 
+  g_hash_table_foreach(
+    priv->connections_from_hostname,
+    inf_xmpp_manager_dispose_destroy_unresolved,
+    manager
+  );
+
+  g_hash_table_destroy(priv->connections_from_hostname);
   g_tree_destroy(priv->connections);
+
   priv->connections = NULL;
+  priv->connections_from_hostname = NULL;
 
   G_OBJECT_CLASS(parent_class)->dispose(object);
 }
@@ -430,6 +466,73 @@ inf_xmpp_manager_class_init(gpointer g_class,
   );
 }
 
+/* Handles status changes of unresolved connections.
+ *
+ * If connections are being established, which are already
+ * handled by the InfXmppManager, they are suppressed.
+ *
+ * If connections are established successfully,
+ * the signal using this callback is disconnected. */
+static void
+inf_xmpp_manager_notify_connection_status_cb(GObject* object,
+                                             GParamSpec* pspec,
+                                             gpointer user_data)
+{
+  InfXmppConnection* connection;
+  InfXmppManager* manager;
+  InfXmppManagerPrivate* priv;
+  InfTcpConnection* tcp;
+  InfTcpConnectionStatus tcp_status;
+  gchar* key;
+  const gchar* remote_host;
+  guint port;
+  gulong signal_handler_id;
+
+  connection = INF_XMPP_CONNECTION(object);
+  manager = INF_XMPP_MANAGER(user_data);
+  g_object_get(G_OBJECT(connection), "tcp-connection", &tcp, NULL);
+  g_object_get(G_OBJECT(tcp), "status", &tcp_status, NULL);
+
+  if(tcp_status == INF_TCP_CONNECTION_CONNECTING ||
+     tcp_status == INF_TCP_CONNECTION_CONNECTED)
+  {
+    /* This handles the following case:
+     * An unresolved host entry is loaded, but not opened.
+     * A resolved connection for the same host is added and opened.
+     * The unresolved host entry is opened.
+     *
+     * Handling: The connecting is suppressed if it is already managed. */
+    if(inf_xmpp_manager_contains_connection(manager, connection) == TRUE)
+    {
+      inf_tcp_connection_close(tcp);
+      g_object_unref(tcp);
+    }
+    /* An unresolved host entry is connecting and not already managed.
+     * Add the entry to the manager, stop listening to the signal,
+     * and remove the entry from the hostbased connection collection. */
+    else
+    {
+      inf_xmpp_manager_add_connection(manager, connection);
+
+      //Remove the connection from the host based connection list
+      port = inf_tcp_connection_get_remote_port(tcp);
+      priv = INF_XMPP_MANAGER_PRIVATE(manager);
+      remote_host = inf_tcp_connection_get_remote_host(tcp);
+      key = g_strdup_printf("%s:%u", remote_host, port);
+      g_object_unref(tcp);
+
+      g_hash_table_remove(priv->connections_from_hostname, key);
+      g_free(key);
+
+      inf_signal_handlers_disconnect_by_func(
+        connection,
+        G_CALLBACK(inf_xmpp_manager_notify_connection_status_cb),
+        manager
+      );
+    }
+  }
+}
+
 GType
 inf_xmpp_manager_get_type(void)
 {
@@ -545,6 +648,54 @@ inf_xmpp_manager_contains_connection(InfXmppManager* manager,
 }
 
 /**
+ * inf_xmpp_manager_add_connection_from_hostname:
+ * @manager: A #InfXmppManager.
+ * @connection: A #InfXmppConnection not yet contained in @manager.
+ *
+ * Adds the given connection to @manager not until it is connected.
+ *
+ * After the @connection has connected, it is found by
+ * inf_xmpp_manager_lookup_connection_by_address() and
+ * inf_xmpp_manager_contains_connection().
+ */
+void
+inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
+                                              InfXmppConnection* connection)
+{
+  InfXmppManagerPrivate* priv;
+  InfTcpConnection* tcp;
+  guint port;
+  const gchar* remote_host;
+  gchar* key;
+  GHashTable* connections_from_hostname;
+
+  g_object_get(G_OBJECT(connection), "tcp-connection", &tcp, NULL);
+
+  port = inf_tcp_connection_get_remote_port(tcp);
+  remote_host = inf_tcp_connection_get_remote_host(tcp);
+
+  key = g_strdup_printf("%s:%u", remote_host, port);
+  g_object_unref(tcp);
+
+  priv = INF_XMPP_MANAGER_PRIVATE(manager);
+  connections_from_hostname=priv->connections_from_hostname;
+
+  if(g_hash_table_lookup(connections_from_hostname, key) == NULL)
+  {
+    g_signal_connect(
+      connection,
+      "notify::status",
+      G_CALLBACK(inf_xmpp_manager_notify_connection_status_cb),
+      manager
+    );
+    g_hash_table_insert(connections_from_hostname, key, connection);
+    //key gets freed by the hashtable 
+  }
+  else
+    g_free(key);
+}
+
+/**
  * inf_xmpp_manager_add_connection:
  * @manager: A #InfXmppManager.
  * @connection: A #InfXmppConnection not yet contained in @manager.
@@ -552,24 +703,42 @@ inf_xmpp_manager_contains_connection(InfXmppManager* manager,
  * Adds the given connection to @manager so that it is found by
  * inf_xmpp_manager_lookup_connection_by_address() and
  * inf_xmpp_manager_contains_connection().
+ *
+ * Note, that unresolved connections (connections where
+ * inf_tcp_connection_get_remote_address() is @NULL) get added
+ * not until they are connected.
  */
 void
 inf_xmpp_manager_add_connection(InfXmppManager* manager,
                                 InfXmppConnection* connection)
 {
+  InfIpAddress* addr;
+
   g_return_if_fail(INF_IS_XMPP_MANAGER(manager));
   g_return_if_fail(INF_IS_XMPP_CONNECTION(connection));
   g_return_if_fail(
     inf_xmpp_manager_contains_connection(manager, connection) == FALSE
   );
 
-  g_signal_emit(
-    G_OBJECT(manager),
-    xmpp_manager_signals[ADD_CONNECTION],
-    0,
-    connection
-  );
+  InfTcpConnection* tcp;
+  g_object_get(G_OBJECT(connection), "tcp-connection", &tcp, NULL);
+  g_assert(tcp != NULL);
+
+  addr = inf_tcp_connection_get_remote_address(tcp);
+
+  if(addr == NULL)
+    inf_xmpp_manager_add_connection_from_hostname(manager, connection);
+  else
+    g_signal_emit(
+      G_OBJECT(manager),
+      xmpp_manager_signals[ADD_CONNECTION],
+      0,
+      connection
+    );
+
+  g_object_unref(tcp);
 }
+
 /**
  * inf_xmpp_manager_remove_connection:
  * @manager: A #InfXmppManager.

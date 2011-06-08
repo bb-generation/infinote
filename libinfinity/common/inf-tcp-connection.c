@@ -32,6 +32,7 @@
 # include <sys/types.h>
 # include <sys/socket.h>
 # include <netinet/in.h>
+# include <netdb.h>
 # include <net/if.h>
 # include <arpa/inet.h>
 # include <unistd.h>
@@ -41,6 +42,11 @@
 # include <string.h>
 #else
 # include <ws2tcpip.h>
+/* We need to include wspiapi.h to support getaddrinfo on Windows 2000.
+ * See the MSDN article for getaddrinfo
+ * http://msdn.microsoft.com/en-us/library/ms738520(VS.85).aspx
+ * and bug #425. */
+# include <wspiapi.h>
 #endif
 
 #ifdef G_OS_WIN32
@@ -75,6 +81,7 @@ struct _InfTcpConnectionPrivate {
   InfNativeSocket socket;
 
   InfIpAddress* remote_address;
+  gchar* remote_host;
   guint remote_port;
   unsigned int device_index;
 
@@ -92,6 +99,7 @@ enum {
   PROP_STATUS,
 
   PROP_REMOTE_ADDRESS,
+  PROP_REMOTE_HOST,
   PROP_REMOTE_PORT,
   PROP_LOCAL_ADDRESS,
   PROP_LOCAL_PORT,
@@ -113,6 +121,7 @@ enum {
 static GObjectClass* parent_class;
 static guint tcp_connection_signals[LAST_SIGNAL];
 static GQuark inf_tcp_connection_error_quark;
+static GQuark inf_tcp_connection_resolve_error_quark;
 
 static void
 inf_tcp_connection_addr_info(InfNativeSocket socket,
@@ -480,6 +489,7 @@ inf_tcp_connection_init(GTypeInstance* instance,
   priv->socket = INVALID_SOCKET;
 
   priv->remote_address = NULL;
+  priv->remote_host = NULL;
   priv->remote_port = 0;
   priv->device_index = 0;
 
@@ -525,6 +535,7 @@ inf_tcp_connection_finalize(GObject* object)
   if(priv->socket != INVALID_SOCKET)
     closesocket(priv->socket);
 
+  g_free(priv->remote_host);
   g_free(priv->queue);
 
   G_OBJECT_CLASS(parent_class)->finalize(object);
@@ -558,6 +569,16 @@ inf_tcp_connection_set_property(GObject* object,
     if(priv->remote_address != NULL)
       inf_ip_address_free(priv->remote_address);
     priv->remote_address = (InfIpAddress*)g_value_dup_boxed(value);
+    g_free(priv->remote_host);
+    priv->remote_host = NULL;
+    break;
+  case PROP_REMOTE_HOST:
+    g_assert(priv->status == INF_TCP_CONNECTION_CLOSED);
+    if(priv->remote_address != NULL)
+      inf_ip_address_free(priv->remote_address);
+    priv->remote_address = NULL;
+    g_free(priv->remote_host);
+    priv->remote_host = g_value_dup_string(value);
     break;
   case PROP_REMOTE_PORT:
     g_assert(priv->status == INF_TCP_CONNECTION_CLOSED);
@@ -623,6 +644,9 @@ inf_tcp_connection_get_property(GObject* object,
     break;
   case PROP_REMOTE_ADDRESS:
     g_value_set_static_boxed(value, priv->remote_address);
+    break;
+  case PROP_REMOTE_HOST:
+    g_value_set_string(value, priv->remote_host);
     break;
   case PROP_REMOTE_PORT:
     g_value_set_uint(value, priv->remote_port);
@@ -727,6 +751,10 @@ inf_tcp_connection_class_init(gpointer g_class,
     "INF_TCP_CONNECTION_ERROR"
   );
 
+  inf_tcp_connection_resolve_error_quark = g_quark_from_static_string(
+    "INF_TCP_CONNECTION_RESOLVE_ERROR"
+  );
+
   g_object_class_install_property(
     object_class,
     PROP_IO,
@@ -760,6 +788,18 @@ inf_tcp_connection_class_init(gpointer g_class,
       "Remote address",
       "Address to connect to",
       INF_TYPE_IP_ADDRESS,
+      G_PARAM_READWRITE
+    )
+  );
+
+  g_object_class_install_property(
+    object_class,
+    PROP_REMOTE_HOST,
+    g_param_spec_string(
+      "remote-host",
+      "Remote host",
+      "Hostname to connect to",
+      "",
       G_PARAM_READWRITE
     )
   );
@@ -987,6 +1027,41 @@ inf_tcp_connection_new(InfIo* io,
   return tcp;
 }
 
+
+/**
+ * inf_tcp_connection_new_from_hostname:
+ * @io: A #InfIo object used to watch for activity.
+ * @remote_host: The host to eventually connect to.
+ *               The host will be resolved when opening the
+ *               connection.
+ * @remote_port: The port to eventually connect to.
+ *
+ * Creates a new #InfTcpConnection. The arguments are stored as properties for
+ * an eventual inf_tcp_connection_open() call, this function itself does not
+ * establish a connection.
+ *
+ * Returns: A new #InfTcpConnection. Free with g_object_unref().
+ **/
+InfTcpConnection*
+inf_tcp_connection_new_from_hostname(InfIo *io,
+                                     const gchar* remote_host,
+                                     guint remote_port)
+{
+  InfTcpConnection* tcp;
+
+  g_return_val_if_fail(INF_IS_IO(io), NULL);
+  g_return_val_if_fail(remote_host != NULL, NULL);
+  g_return_val_if_fail(remote_port <= 65535, NULL);
+
+  tcp = INF_TCP_CONNECTION(
+    g_object_new(
+      INF_TYPE_TCP_CONNECTION,
+      "io", io,
+      "remote-host", remote_host,
+      "remote-port", remote_port,
+      NULL));
+}
+
 /**
  * inf_tcp_connection_new_and_open:
  * @io: A #InfIo object used to watch for activity.
@@ -1030,10 +1105,10 @@ inf_tcp_connection_new_and_open(InfIo* io,
  * @error: Location to store error information.
  *
  * Attempts to open @connection. Make sure to have set the "remote-address"
- * and "remote-port" property before calling this function. If an error
- * occurs, the function returns %FALSE and @error is set. Note however that
- * the connection might not be fully open when the function returns
- * (check the "status" property if you need to know). If an asynchronous
+ * and "remote-port", or "remote-host", property before calling this function.
+ * If an erroroccurs, the function returns %FALSE and @error is set.
+ * Note however that the connection might not be fully open when the function
+ * returns (check the "status" property if you need to know). If an asynchronous
  * error occurs while the connection is being opened, the "error" signal
  * is emitted.
  *
@@ -1065,8 +1140,13 @@ inf_tcp_connection_open(InfTcpConnection* connection,
 
   g_return_val_if_fail(priv->io != NULL, FALSE);
   g_return_val_if_fail(priv->status == INF_TCP_CONNECTION_CLOSED, FALSE);
-  g_return_val_if_fail(priv->remote_address != NULL, FALSE);
   g_return_val_if_fail(priv->remote_port != 0, FALSE);
+
+  if(priv->remote_host != NULL && priv->remote_address == NULL)
+    if(!inf_tcp_connection_resolve(connection, error))
+      return FALSE;
+
+  g_return_val_if_fail(priv->remote_address != NULL, FALSE);
 
   /* Close previous socket */
   if(priv->socket != INVALID_SOCKET)
@@ -1232,6 +1312,103 @@ inf_tcp_connection_close(InfTcpConnection* connection)
 }
 
 /**
+ * inf_tcp_connection_resolve:
+ * @connection: A #InfTcpConnection.
+ * @error: Location to store error information.
+ *
+ * Attempts to resolve the hostname of the @connection. Make sure to have
+ * set the "remote-host" and "remote-port" properties before calling this
+ * function. Furthermore, "remote-address" must not be set.
+ * If an error occurs, the function returns %FALSE and @error is set.
+ * Note however that the connection might not be fully open when the function
+ * returns (check the "status" property if you need to know).
+ *
+ * Returns: %FALSE if an error occured and %TRUE otherwise.
+ **/
+gboolean
+inf_tcp_connection_resolve(InfTcpConnection* connection,
+                                    GError** error)
+{
+  InfTcpConnectionPrivate* priv;
+  struct addrinfo hint;
+  gchar* remote_port;
+
+  g_return_val_if_fail(INF_IS_TCP_CONNECTION(connection), FALSE);
+  priv = INF_TCP_CONNECTION_PRIVATE(connection);
+
+  g_return_val_if_fail(priv->io != NULL, FALSE);
+  g_return_val_if_fail(priv->status == INF_TCP_CONNECTION_CLOSED, FALSE);
+
+  g_return_val_if_fail(priv->remote_address == NULL, FALSE);
+  g_return_val_if_fail(priv->remote_port != 0, FALSE);
+  g_return_val_if_fail(priv->remote_host != NULL, FALSE);
+
+#ifdef AI_ADDRCONFIG
+  hint.ai_flags = AI_ADDRCONFIG;
+#else
+  hint.ai_flags = 0;
+#endif
+  hint.ai_family = AF_UNSPEC;
+  hint.ai_socktype = SOCK_STREAM;
+  hint.ai_protocol = 0;
+  hint.ai_addrlen = 0;
+  hint.ai_canonname = NULL;
+  hint.ai_addr = NULL;
+  hint.ai_next = NULL;
+
+  struct addrinfo* res = NULL;
+  remote_port = g_strdup_printf("%i", priv->remote_port);
+  int val = getaddrinfo(priv->remote_host,
+                        remote_port,
+                        &hint,&res);
+  g_free(remote_port);
+  if(val != 0)
+  {
+    g_assert(res == NULL);
+    g_set_error(
+      error,
+      inf_tcp_connection_resolve_error_quark,
+      val,
+      "%s",
+      gai_strerror(val)
+    );
+    return FALSE;
+  }
+  else
+  {
+    g_assert(res != NULL);
+
+    InfIpAddress* addr;
+    guint port;
+
+    switch(res->ai_family)
+    {
+    case AF_INET:
+      addr = inf_ip_address_new_raw4(((struct sockaddr_in*)res->ai_addr)
+                                     ->sin_addr.s_addr);
+      port = ntohs(((struct sockaddr_in*)res->ai_addr)->sin_port);
+
+      break;
+    case AF_INET6:
+      addr = inf_ip_address_new_raw6(((struct sockaddr_in6*)res->ai_addr)
+                                     ->sin6_addr.s6_addr);
+      port = ntohs(((struct sockaddr_in6*)res->ai_addr)->sin6_port);
+      break;
+    default:
+      g_assert_not_reached();
+      break;
+    }
+    freeaddrinfo(res);
+
+    priv->remote_address = addr;
+    g_assert(priv->remote_port == port);
+
+    g_object_notify(G_OBJECT(connection), "remote-address");
+  }
+  return TRUE;
+}
+
+/**
  * inf_tcp_connection_send:
  * @connection: A #InfTcpConnection with status %INF_TCP_CONNECTION_CONNECTED.
  * @data: The data to send.
@@ -1359,6 +1536,21 @@ inf_tcp_connection_get_remote_address(InfTcpConnection* connection)
 {
   g_return_val_if_fail(INF_IS_TCP_CONNECTION(connection), NULL);
   return INF_TCP_CONNECTION_PRIVATE(connection)->remote_address;
+}
+
+/**
+ * inf_tcp_connection_get_remote_host:
+ * @connection: A #InfTcpConnection.
+ *
+ * Returns the hostname of the remote site.
+ *
+ * Return Value: The hostname of the @connection.
+ **/
+const gchar*
+inf_tcp_connection_get_remote_host(InfTcpConnection* connection)
+{
+  g_return_val_if_fail(INF_IS_TCP_CONNECTION(connection), NULL);
+  return INF_TCP_CONNECTION_PRIVATE(connection)->remote_host;
 }
 
 /**
