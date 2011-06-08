@@ -466,20 +466,13 @@ inf_xmpp_manager_class_init(gpointer g_class,
   );
 }
 
-/**
- * inf_xmpp_manager_notify_connection_status_cb:
- * @object: A #InfXmppConnection
- * @pspec: Is ignored
- * @user_data: A #InfXmppManager
- *
- * Handles status changes of unresolved connections.
+/* Handles status changes of unresolved connections.
  *
  * If connections are being established, which are already
- * handled by the #InfXmppManager, they are suppressed.
+ * handled by the InfXmppManager, they are suppressed.
  *
  * If connections are established successfully,
- * the signal using this callback is disconnected.
- */
+ * the signal using this callback is disconnected. */
 static void
 inf_xmpp_manager_notify_connection_status_cb(GObject* object,
                                              GParamSpec* pspec,
@@ -696,6 +689,7 @@ inf_xmpp_manager_add_connection_from_hostname(InfXmppManager* manager,
       manager
     );
     g_hash_table_insert(connections_from_hostname, key, connection);
+    //key gets freed by the hashtable 
   }
   else
     g_free(key);
