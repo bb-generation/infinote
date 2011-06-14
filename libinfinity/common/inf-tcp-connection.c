@@ -709,7 +709,7 @@ inf_tcp_connection_set_keepalive(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-  if(activate == -1)
+  if(activate <= -1)
   {
     /* if os default is set, use that value */
     if(priv->default_keepalive->use_keepalive != -1)
@@ -802,7 +802,7 @@ inf_tcp_connection_set_keepalive_time(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-  if(time == -1)
+  if(time <= -1)
   {
     /* if os default is set, use that value */
     if(priv->default_keepalive->keepalive_time != -1)
@@ -911,7 +911,7 @@ inf_tcp_connection_set_keepalive_interval(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-  if(interval == -1)
+  if(interval <= -1)
   {
     /* if os default is set, use that value */
     if(priv->default_keepalive->keepalive_interval != -1)
@@ -994,7 +994,7 @@ inf_tcp_connection_set_keepalive_probes(InfTcpConnection* connection,
   if(priv->socket == INVALID_SOCKET)
     return FALSE;
 
-  if(probes == -1)
+  if(probes <= -1)
   {
     /* if os default is set, use that value */
     if(priv->default_keepalive->keepalive_probes != -1)
