@@ -80,6 +80,15 @@ void
 inf_gtk_browser_view_set_selected(InfGtkBrowserView* view,
                                   GtkTreeIter* iter);
 
+void
+inf_gtk_browser_view_set_status_cell_renderer(InfGtkBrowserView* view,
+					      GtkCellRenderer* renderer);
+
+GtkTreeViewColumn*
+inf_gtk_browser_view_get_column(InfGtkBrowserView* view);
+
+
+
 G_END_DECLS
 
 #endif /* __INF_GTK_BROWSER_VIEW_H__ */
