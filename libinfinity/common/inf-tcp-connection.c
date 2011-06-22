@@ -751,7 +751,7 @@ inf_tcp_connection_get_keepalive_time(InfTcpConnection* connection)
   if(priv->socket == INVALID_SOCKET)
     return -1;
 
-#if defined(TCP_KEEPIDLE) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
+#if defined(TCP_KEEPIDLE) || defined(TCP_KEEPALIVE) || (defined(G_OS_WIN32) && defined(SIO_KEEPALIVE_VALS))
 
 #ifndef G_OS_WIN32
 
